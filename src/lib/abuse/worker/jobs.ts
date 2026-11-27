@@ -46,7 +46,8 @@ import { probeCollectedHost } from "../../website/visit_queue/collect";
  * - `liveness`: site checks run on their schedule after each report, hundreds
  *   a day, each on time instead of behind provider and browser work.
  * - `visit`: every website analysis, `WEBSITE_VISIT_CONCURRENCY` at once,
- *   shared fairly between reporters (`laneFilter`).
+ *   shared fairly between reporters (`laneFilter`). A visit that finds no
+ *   browser pauses the whole lane (`OutageBackoff`); no other lane waits.
  */
 export const JOB_LANES = ["control", "external", "sweep", "link", "discovery", "liveness", "visit"] as const;
 export type JobLane = (typeof JOB_LANES)[number];

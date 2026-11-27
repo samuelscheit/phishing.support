@@ -1,13 +1,17 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { chromiumAvailable, launchTestChromium } from "./task/test_helpers";
 import {
 	acquireFabricCdpSession,
 	acquireFabricPatchrightSession,
+	acquireFabricPuppeteerBrowser,
 	BrowserUnavailableError,
 	buildFabricBrowserSessionCreatePayload,
+	configureFabricLeases,
 	connectThroughRelay,
 	fabricBrowserConfigFromEnvironment,
+	fabricLeaseLimitFromEnvironment,
+	fabricLeaseUsage,
 	isBrowserUnavailable,
 	fabricRelayEndpoint,
 	type FabricBrowserConfig,
@@ -447,5 +451,307 @@ describe("Phishing Support Browser Fabric boundary", () => {
 			)).rejects.toThrow("session ended in failed");
 			expect(attempts).toBe(1);
 		});
+
+		test("an aborted signal connects nothing, and an abort while the relay is full stops waiting at once", async () => {
+			const reason = new Error("visit cancelled");
+			let attempts = 0;
+			await expect(connectThroughRelay(async () => { attempts++; return "browser"; }, async () => undefined, { signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
+			expect(attempts).toBe(0);
+			const controller = new AbortController();
+			const started = Date.now();
+			const waiting = connectThroughRelay(async () => { attempts++; throw relayFull(); }, async () => undefined, { retryMs: 60_000, signal: controller.signal });
+			setTimeout(() => controller.abort(reason), 20);
+			await expect(waiting).rejects.toBe(reason);
+			expect(attempts).toBe(1);
+			expect(Date.now() - started).toBeLessThan(5_000);
+		});
+
+		test("a connect that fails because of the abort reports the abort, not the connect's own error", async () => {
+			const controller = new AbortController();
+			const reason = new Error("job timed out");
+			await expect(connectThroughRelay(async () => {
+				controller.abort(reason);
+				throw new Error("WebSocket closed");
+			}, async () => undefined, { signal: controller.signal })).rejects.toBe(reason);
+		});
+	});
+
+	describe("Fabric API answers", () => {
+		const relayUrl = process.env.FABRIC_CDP_RELAY_URL;
+		beforeAll(() => { process.env.FABRIC_CDP_RELAY_URL = "http://fabric-cdp-relay:8085"; });
+		afterAll(() => {
+			if (relayUrl === undefined) delete process.env.FABRIC_CDP_RELAY_URL;
+			else process.env.FABRIC_CDP_RELAY_URL = relayUrl;
+		});
+		afterEach(() => configureFabricLeases());
+
+		function fabricAnswering(create: Array<{ status: number; body: unknown } | "drop">) {
+			const keys: Array<string | null> = [];
+			const config: FabricBrowserConfig = {
+				...fabricBrowserConfigFromEnvironment({ environment: environment() })!,
+				fetch: async (input, init) => {
+					if (new URL(String(input)).pathname !== "/v1/browser-sessions") return Response.json({ status: "released" });
+					keys.push(new Headers(init?.headers).get("idempotency-key"));
+					const answer = create[Math.min(keys.length, create.length) - 1]!;
+					if (answer === "drop") throw new TypeError("fetch failed: socket closed");
+					return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } });
+				},
+			};
+			return { config, keys };
+		}
+
+		async function failure(create: Array<{ status: number; body: unknown } | "drop">) {
+			const fabric = fabricAnswering(create);
+			const error = await acquireFabricCdpSession({}, {}, fabric.config).then(() => undefined, (thrown: unknown) => thrown);
+			expect(error).toBeInstanceOf(BrowserUnavailableError);
+			return { message: (error as Error).message, keys: fabric.keys };
+		}
+
+		test("names Fabric's HTTP status with its problem detail, and never crashes on a null, array or non-JSON body", async () => {
+			expect((await failure([{ status: 422, body: { detail: " unknown recipe " } }])).message).toContain("Browser Fabric request failed (HTTP 422): unknown recipe)");
+			for (const body of [null, [], "text", { detail: 42 }, { detail: "  " }]) {
+				expect((await failure([{ status: 409, body }])).message, JSON.stringify(body)).toBe("no browser was available (Browser Fabric request failed (HTTP 409))");
+			}
+			const fabric = fabricAnswering([]);
+			fabric.config.fetch = async () => new Response("<html>bad gateway</html>", { status: 400 });
+			await expect(acquireFabricCdpSession({}, {}, fabric.config)).rejects.toThrow("Browser Fabric request failed (HTTP 400)");
+		});
+
+		test("a successful answer without a session (null, array, missing id) is refused, not a crash", async () => {
+			for (const body of [null, [], {}, { id: 7, status: "ready" }]) {
+				expect((await failure([{ status: 201, body }])).message, JSON.stringify(body)).toContain("Browser Fabric session ID is invalid");
+			}
+		});
+
+		test("a create lost in transit or refused by Fabric's own trouble is sent once more under the same idempotency key", async () => {
+			for (const first of ["drop", { status: 503, body: null }, { status: 429, body: { detail: "busy" } }] as const) {
+				const fabric = fabricAnswering([first, { status: 201, body: { id: "browser-session_retry", status: "queued" } }]);
+				const session = await acquireFabricCdpSession({}, {}, fabric.config);
+				expect(session.id).toBe("browser-session_retry");
+				expect(fabric.keys).toHaveLength(2);
+				expect(fabric.keys[0]).toStartWith("phishing-");
+				expect(fabric.keys[1]).toBe(fabric.keys[0]!);
+				await session.release();
+			}
+		});
+
+		test("a create is retried once only, and a refusal never", async () => {
+			const lost = await failure(["drop", "drop", { status: 201, body: { id: "browser-session_late", status: "queued" } }]);
+			expect(lost.message).toContain("Browser Fabric transport request failed (fetch failed: socket closed)");
+			expect(lost.keys).toHaveLength(2);
+			const broken = await failure([{ status: 502, body: null }, { status: 500, body: { detail: "database down" } }]);
+			expect(broken.message).toContain("(HTTP 500): database down");
+			expect(broken.keys).toHaveLength(2);
+			const refused = await failure([{ status: 400, body: { detail: "bad metadata" } }, { status: 201, body: { id: "browser-session_never", status: "queued" } }]);
+			expect(refused.keys).toHaveLength(1);
+		});
+
+		test("a caller's own idempotency key is sent instead of a random one", async () => {
+			const fabric = fabricAnswering([{ status: 201, body: { id: "browser-session_keyed", status: "queued" } }]);
+			const session = await acquireFabricCdpSession({}, { idempotencyKey: "phishing-job-42-attempt-1" }, fabric.config);
+			expect(fabric.keys).toEqual(["phishing-job-42-attempt-1"]);
+			await session.release();
+		});
+	});
+
+	describe("the process's lease slots", () => {
+		const relayUrl = process.env.FABRIC_CDP_RELAY_URL;
+		beforeAll(() => { process.env.FABRIC_CDP_RELAY_URL = "http://fabric-cdp-relay:8085"; });
+		afterAll(() => {
+			if (relayUrl === undefined) delete process.env.FABRIC_CDP_RELAY_URL;
+			else process.env.FABRIC_CDP_RELAY_URL = relayUrl;
+		});
+		afterEach(() => configureFabricLeases());
+
+		const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+		/** A Fabric whose creates can be held back; every session gets its own ID. */
+		function fabric() {
+			const calls: string[] = [];
+			const held: Array<() => void> = [];
+			let hold = false;
+			let sessions = 0;
+			const config: FabricBrowserConfig = {
+				...fabricBrowserConfigFromEnvironment({ environment: environment() })!,
+				fetch: async (input, init) => {
+					const path = new URL(String(input)).pathname;
+					calls.push(`${init?.method ?? "GET"} ${path}`);
+					if (path !== "/v1/browser-sessions") return Response.json({ status: "released" });
+					const answer = () => Response.json({ id: `browser-session_s${++sessions}`, status: "queued" }, { status: 201 });
+					if (!hold) return answer();
+					return new Promise<Response>((resolve) => held.push(() => resolve(answer())));
+				},
+			};
+			return { config, calls, held, holdCreates: () => { hold = true; } };
+		}
+
+		test("the limit defaults to one fewer than Fabric's own, never below one, and FABRIC_MAX_LOCAL_LEASES overrides it", () => {
+			expect(fabricLeaseLimitFromEnvironment({})).toBe(3);
+			expect(fabricLeaseLimitFromEnvironment({ FABRIC_MAX_ACTIVE_BROWSER_LEASES: "8" })).toBe(7);
+			expect(fabricLeaseLimitFromEnvironment({ FABRIC_MAX_ACTIVE_BROWSER_LEASES: "1" })).toBe(1);
+			expect(fabricLeaseLimitFromEnvironment({ FABRIC_MAX_ACTIVE_BROWSER_LEASES: "2", FABRIC_MAX_LOCAL_LEASES: " 5 " })).toBe(5);
+			for (const invalid of ["0", "-2", "abc", "3.5", "4x", ""]) {
+				expect(fabricLeaseLimitFromEnvironment({ FABRIC_MAX_ACTIVE_BROWSER_LEASES: invalid, FABRIC_MAX_LOCAL_LEASES: invalid }), invalid).toBe(3);
+			}
+		});
+
+		test("reads the environment when not configured, and again after a reset", () => {
+			const saved = process.env.FABRIC_MAX_LOCAL_LEASES;
+			try {
+				process.env.FABRIC_MAX_LOCAL_LEASES = "6";
+				configureFabricLeases();
+				expect(fabricLeaseUsage()).toEqual({ limit: 6, available: 6, waiting: 0 });
+				configureFabricLeases({ limit: 2 });
+				expect(fabricLeaseUsage().limit).toBe(2);
+			} finally {
+				if (saved === undefined) delete process.env.FABRIC_MAX_LOCAL_LEASES;
+				else process.env.FABRIC_MAX_LOCAL_LEASES = saved;
+			}
+		});
+
+		test("a lease beyond the limit waits for a slot, gets the next one freed, and every slot comes back exactly once", async () => {
+			configureFabricLeases({ limit: 2 });
+			const { config, calls } = fabric();
+			const first = await acquireFabricCdpSession({}, {}, config);
+			const second = await acquireFabricCdpSession({}, {}, config);
+			expect(fabricLeaseUsage()).toEqual({ limit: 2, available: 0, waiting: 0 });
+			const third = acquireFabricCdpSession({}, {}, config);
+			await tick();
+			expect(fabricLeaseUsage().waiting).toBe(1);
+			// It waits before asking Fabric for anything.
+			expect(calls.filter((call) => call === "POST /v1/browser-sessions")).toHaveLength(2);
+			await first.cancel();
+			await first.release();
+			const leased = await third;
+			expect(leased.id).toBe("browser-session_s3");
+			expect(fabricLeaseUsage()).toEqual({ limit: 2, available: 0, waiting: 0 });
+			await second.release();
+			await leased.release();
+			await leased.cancel();
+			expect(fabricLeaseUsage()).toEqual({ limit: 2, available: 2, waiting: 0 });
+		});
+
+		test("a lease that waits past the bound is a missing browser, and leaves nothing behind", async () => {
+			configureFabricLeases({ limit: 1, waitMs: 30 });
+			const { config, calls } = fabric();
+			const held = await acquireFabricCdpSession({}, {}, config);
+			const error = await acquireFabricCdpSession({}, {}, config).catch((thrown: unknown) => thrown);
+			expect(error).toBeInstanceOf(BrowserUnavailableError);
+			expect((error as Error).message).toContain("all 1 browser leases of this process stayed busy");
+			expect(fabricLeaseUsage()).toEqual({ limit: 1, available: 0, waiting: 0 });
+			expect(calls).toEqual(["POST /v1/browser-sessions"]);
+			await held.release();
+			expect(fabricLeaseUsage().available).toBe(1);
+		});
+
+		test("an abort while waiting for a slot rejects with its own reason, asks Fabric for nothing, and leaves the queue", async () => {
+			configureFabricLeases({ limit: 1 });
+			const { config, calls } = fabric();
+			const held = await acquireFabricCdpSession({}, {}, config);
+			const controller = new AbortController();
+			const reason = new Error("job timed out");
+			const waiting = acquireFabricCdpSession({}, { signal: controller.signal }, config);
+			await tick();
+			expect(fabricLeaseUsage().waiting).toBe(1);
+			controller.abort(reason);
+			const error = await waiting.catch((thrown: unknown) => thrown);
+			expect(error).toBe(reason);
+			expect(isBrowserUnavailable(error)).toBeFalse();
+			expect(fabricLeaseUsage()).toEqual({ limit: 1, available: 0, waiting: 0 });
+			await held.release();
+			expect(fabricLeaseUsage().available).toBe(1);
+			expect(calls.filter((call) => call === "POST /v1/browser-sessions")).toHaveLength(1);
+			// An already aborted signal never takes a free slot either.
+			await expect(acquireFabricCdpSession({}, { signal: AbortSignal.abort(reason) }, config)).rejects.toBe(reason);
+			expect(fabricLeaseUsage().available).toBe(1);
+		});
+
+		test("an abort while the create is in flight rejects at once, holds the slot until the late session is cancelled, then frees it", async () => {
+			configureFabricLeases({ limit: 1 });
+			const { config, calls, held, holdCreates } = fabric();
+			holdCreates();
+			const controller = new AbortController();
+			const reason = new Error("worker stopping");
+			const pending = acquireFabricCdpSession({}, { signal: controller.signal }, config);
+			await tick();
+			expect(held).toHaveLength(1);
+			controller.abort(reason);
+			await expect(pending).rejects.toBe(reason);
+			expect(fabricLeaseUsage().available).toBe(0);
+			held[0]!();
+			await tick();
+			await tick();
+			expect(calls).toEqual(["POST /v1/browser-sessions", "POST /v1/browser-sessions/browser-session_s1/cancel"]);
+			expect(fabricLeaseUsage().available).toBe(1);
+		});
+
+		test("aborting a held lease cancels it and frees its slot; finishing it later does nothing more", async () => {
+			configureFabricLeases({ limit: 1 });
+			const { config, calls } = fabric();
+			const controller = new AbortController();
+			const session = await acquireFabricCdpSession({}, { signal: controller.signal }, config);
+			expect(fabricLeaseUsage().available).toBe(0);
+			controller.abort(new Error("job timed out"));
+			await tick();
+			await tick();
+			expect(fabricLeaseUsage().available).toBe(1);
+			await session.release();
+			expect(calls).toEqual(["POST /v1/browser-sessions", "POST /v1/browser-sessions/browser-session_s1/cancel"]);
+		});
+
+		test("a released lease no longer listens to its signal", async () => {
+			const { config, calls } = fabric();
+			const controller = new AbortController();
+			const session = await acquireFabricCdpSession({}, { signal: controller.signal }, config);
+			await session.release();
+			controller.abort();
+			await tick();
+			expect(calls).toEqual(["POST /v1/browser-sessions", "POST /v1/browser-sessions/browser-session_s1/release"]);
+		});
+
+		test("a failed create or connect gives its slot back", async () => {
+			configureFabricLeases({ limit: 1, waitMs: 50 });
+			const refused = fabric();
+			refused.config.fetch = async () => Response.json({ detail: "quota exceeded" }, { status: 403 });
+			await expect(acquireFabricCdpSession({}, {}, refused.config)).rejects.toBeInstanceOf(BrowserUnavailableError);
+			expect(fabricLeaseUsage().available).toBe(1);
+			const { config, calls } = fabric();
+			process.env.FABRIC_CDP_RELAY_URL = "http://user:secret@fabric-cdp-relay:8085";
+			try {
+				await expect(acquireFabricCdpSession({}, {}, config)).rejects.toBeInstanceOf(BrowserUnavailableError);
+			} finally {
+				process.env.FABRIC_CDP_RELAY_URL = "http://fabric-cdp-relay:8085";
+			}
+			expect(calls).toEqual(["POST /v1/browser-sessions", "POST /v1/browser-sessions/browser-session_s1/cancel"]);
+			expect(fabricLeaseUsage().available).toBe(1);
+		});
+
+		test("an abort while the client connects through a full relay rejects with its reason, cancels the session and frees the slot", async () => {
+			configureFabricLeases({ limit: 1 });
+			let upgrades = 0;
+			const fullRelay = Bun.serve({ port: 0, fetch: () => { upgrades++; return new Response("relay full", { status: 503 }); } });
+			process.env.FABRIC_CDP_RELAY_URL = `http://127.0.0.1:${fullRelay.port}`;
+			try {
+				const { config, calls } = fabric();
+				const controller = new AbortController();
+				const reason = new Error("visit cancelled");
+				const pending = acquireFabricPuppeteerBrowser({}, { signal: controller.signal }, config);
+				while (upgrades === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+				const abortedAt = Date.now();
+				controller.abort(reason);
+				const error = await pending.catch((thrown: unknown) => thrown);
+				expect(error).toBe(reason);
+				expect(Date.now() - abortedAt).toBeLessThan(1_000);
+				expect(calls).toEqual(["POST /v1/browser-sessions", "POST /v1/browser-sessions/browser-session_s1/cancel"]);
+				expect(fabricLeaseUsage().available).toBe(1);
+				// It stops knocking at the full relay.
+				const knocks = upgrades;
+				await new Promise((resolve) => setTimeout(resolve, 2_500));
+				expect(upgrades).toBe(knocks);
+			} finally {
+				fullRelay.stop(true);
+				process.env.FABRIC_CDP_RELAY_URL = "http://fabric-cdp-relay:8085";
+			}
+		}, 15_000);
 	});
 });

@@ -11,17 +11,21 @@ export const BROWSER_BACKOFF_MS = [5_000, 15_000, 45_000] as const;
 /**
  * Retry a capture only when the browser service failed (relay full, a dropped
  * CDP connection, a closed target). A site that blocks or times out was
- * already retried across every egress inside the capture and is final.
+ * already retried across every egress inside the capture and is final. An
+ * abort of `signal` ends it at once with the signal's reason: no further
+ * attempt, no further wait.
  */
-export async function withBrowserBackoff<T>(capture: () => Promise<T>, delaysMs: readonly number[]): Promise<T> {
+export async function withBrowserBackoff<T>(capture: () => Promise<T>, delaysMs: readonly number[], signal?: AbortSignal): Promise<T> {
 	for (let attempt = 0; ; attempt++) {
+		signal?.throwIfAborted();
 		try {
 			return await capture();
 		} catch (error) {
+			signal?.throwIfAborted();
 			const delayMs = delaysMs[attempt];
 			if (delayMs === undefined || !isBrowserInfrastructureFailure(error)) throw error;
 			console.warn(`Website capture hit a browser-service failure (${errorText(error)}); retrying in ${delayMs / 1000}s.`);
-			await sleep(delayMs);
+			await sleep(delayMs, signal);
 		}
 	}
 }

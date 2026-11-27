@@ -15,15 +15,17 @@ export function agentAddressOf(browser: Browser): string | undefined {
  *
  * The one Fabric-only entry point makes the manager the sole owner of
  * Chromium, the persistent profile, the egress namespace, and teardown.
+ * `signal` bounds the lease (see `FabricSessionOptions.signal`): its abort
+ * rejects a pending lease with its own reason and cancels a held one.
  */
-export async function getBrowser(egress: FabricEgress = "phishing"): Promise<Browser> {
+export async function getBrowser(egress: FabricEgress = "phishing", options: { signal?: AbortSignal } = {}): Promise<Browser> {
 	// A clone of the reviewed Fabric profile provides a disposable volume while
 	// preserving the manager-owned browser fingerprint. The caller receives the
 	// worker's default context, never an app-created incognito context.
 	// Two connections: the capture's own, and the visiting agent's beside it.
 	const leased = await acquireFabricPuppeteerBrowser(
 		{ operation: "phishing-browser" },
-		{ leaseMode: "clone", egress, maxExternalConnections: 2 },
+		{ leaseMode: "clone", egress, maxExternalConnections: 2, ...options },
 	);
 	const browser = leased.browser as Browser;
 	agentAddresses.set(browser, fabricRelayEndpoint(leased.sessionId));

@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 
+import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { SubmissionsEntity } from "../../db/entities/submissions";
+import { BrowserUnavailableError } from "../../browser/fabric";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
-import type { Job } from "../schema";
+import { jobs, type Job } from "../schema";
 import { AbuseWorker } from "./";
 
 useTemporaryDatabase();
@@ -75,4 +78,61 @@ describe("the worker's lanes", () => {
 			await worker.stop();
 		}
 	});
+
+	test("a visit that finds no browser pauses every visit slot but no other lane, and a visit that succeeds starts the backoff over", async () => {
+		const noBrowser = () => new BrowserUnavailableError(new Error("Expected 101 status code"));
+		const first = await AbuseRepository.enqueueJob({ jobType: "visit_website", payload: {}, dedupeKey: "visit-0" });
+		const visits: number[] = [];
+		let livenessAt = 0;
+		let failedAt = 0;
+		let done!: () => void;
+		const fourthVisit = new Promise<void>((resolve) => { done = resolve; });
+		const worker = new AbuseWorker({
+			pollMs: 5,
+			visitConcurrency: 2,
+			// Without the reset, the outage after the success would pause 20 s.
+			visitOutageBackoffMs: [300, 20_000],
+			processJob: async (job: Job) => {
+				if (job.jobType === "check_site_liveness") {
+					livenessAt = Date.now();
+					return;
+				}
+				visits.push(Date.now());
+				if (visits.length === 1) {
+					// More visits come due while the pause runs, and a site check too.
+					const soon = new Date(Date.now() + 100);
+					for (const index of [1, 2]) await AbuseRepository.enqueueJob({ jobType: "visit_website", payload: {}, dedupeKey: `visit-${index}`, nextAttemptAt: soon });
+					await AbuseRepository.enqueueJob({ jobType: "check_site_liveness", payload: { targetId: "1" }, dedupeKey: "liveness:1" });
+					failedAt = Date.now();
+					throw noBrowser();
+				}
+				if (visits.length === 2) return;
+				if (visits.length === 3) {
+					// The last visit comes due after this outage, whichever slot is free then.
+					await Bun.sleep(50);
+					await AbuseRepository.enqueueJob({ jobType: "visit_website", payload: {}, dedupeKey: "visit-3", nextAttemptAt: new Date(Date.now() + 100) });
+					failedAt = Date.now();
+					throw noBrowser();
+				}
+				done();
+			},
+		});
+		await worker.start();
+		try {
+			await Promise.race([fourthVisit, new Promise((_, reject) => setTimeout(() => reject(new Error("the visit lane stayed paused")), 5_000))]);
+		} finally {
+			await worker.stop();
+		}
+		const [, second, third, fourth] = visits as [number, number, number, number];
+		// No visit slot claimed anything during the first pause; the site check did not wait for it.
+		expect(livenessAt).toBeGreaterThan(0);
+		expect(livenessAt - visits[0]!).toBeLessThan(250);
+		expect(Math.min(second, third) - visits[0]!).toBeGreaterThanOrEqual(280);
+		// The success reset the backoff: the next outage paused its first step again.
+		expect(fourth - failedAt).toBeGreaterThanOrEqual(280);
+		expect(fourth - failedAt).toBeLessThan(3_000);
+		// The job without a browser was deferred, spending none of its attempts.
+		const db = await getDb();
+		expect(db.select().from(jobs).where(eq(jobs.id, first.id)).get()).toMatchObject({ status: "queued", retryCount: 0 });
+	}, 15_000);
 });

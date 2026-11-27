@@ -1,6 +1,6 @@
 import { AbuseRepository } from "../repository";
 import { resolveAbuseTarget } from "../resolver";
-import { acquireFabricCdpSession, cancelFabricBrowserSession } from "../../browser/fabric";
+import { acquireFabricCdpSession, cancelFabricBrowserSession, isBrowserUnavailable } from "../../browser/fabric";
 import type { JobGiveUp } from "../persistence/provider_runs";
 import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
 import type { FabricCdpSessionAcquirer } from "../../browser/task/fabric";
@@ -21,6 +21,8 @@ import { startFaviconRefresh } from "../../favicon/refresh";
 import { enqueueRulesSweep } from "../../campaign/sweep";
 import { ensureLivenessChecks } from "../../liveness/schedule";
 import { sleep } from "../../util/sleep";
+import { raceTimeout } from "../../util/async";
+import { OutageBackoff, OUTAGE_BACKOFF_MS } from "./outage";
 import { isExternalJob, JOB_HANDLERS, JOB_LANES, JOB_POLICY, jobTimeoutMs, laneFilter, type JobLane } from "./jobs";
 import { JOB_WAIT_LIMIT_MS, jobWaitOf, MAX_RETRIES, retryDelayMs } from "./retry";
 import { ensureWebsiteVisitJobs } from "../../website/visit_queue/run";
@@ -32,14 +34,26 @@ const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
 const DEFAULT_CONTROL_CONCURRENCY = 2;
 const DEFAULT_EXTERNAL_CONCURRENCY = 2;
-/** Website visits at once: each holds a browser, and the browser relay has room for a few. */
-const DEFAULT_VISIT_CONCURRENCY = 4;
+/**
+ * Website visits at once: each holds a browser, and the process leases one
+ * browser fewer than Fabric has (`fabricLeaseLimitFromEnvironment`), so
+ * visits never take every lease from portals and logins.
+ */
+const DEFAULT_VISIT_CONCURRENCY = 3;
 const MAX_LANE_CONCURRENCY = 16;
 const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_SWEEP_JOB_TIMEOUT_MS = 20 * 60_000;
 const LIVENESS_JOB_TIMEOUT_MS = 5 * 60_000;
 const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
+/**
+ * How long an interrupted job's work may take to wind down (cancel its
+ * browser lease, close its pages) before the worker settles the job anyway.
+ * Its lease is still renewed meanwhile, so no other worker claims the job
+ * while the old attempt still runs.
+ */
+/** Bounded below Docker's 10 s default SIGTERM→SIGKILL stop timeout so graceful shutdown settles leases before SIGKILL. */
+const DEFAULT_ABORT_GRACE_MS = 7_000;
 
 class JobExecutionTimeoutError extends Error {
 	readonly code = "ABUSE_JOB_TIMEOUT";
@@ -90,6 +104,10 @@ export type AbuseWorkerOptions = {
 	externalJobTimeoutMs?: number;
 	/** Override the origin-sweep execution deadline (primarily for tests). */
 	sweepJobTimeoutMs?: number;
+	/** How long an interrupted job's work may take to wind down before its job is settled (primarily for tests). */
+	abortGraceMs?: number;
+	/** The visit lane's pauses after consecutive browser outages (primarily for tests). */
+	visitOutageBackoffMs?: readonly number[];
 	/** Deterministic test hook; production always dispatches through the provider registry. */
 	processJob?: (job: Job, signal?: AbortSignal) => Promise<void>;
 	/** Test hook: the model that drives browser tasks (production uses the app's OpenAI model). */
@@ -118,6 +136,13 @@ export class AbuseWorker {
 	private readonly controlJobTimeoutMs: number;
 	private readonly externalJobTimeoutMs: number;
 	private readonly sweepJobTimeoutMs: number;
+	private readonly abortGraceMs: number;
+	/**
+	 * Lanes that stop claiming work while the browser service is out: a visit
+	 * that found no browser pauses every visit slot instead of each slot
+	 * hammering Fabric with its own retries.
+	 */
+	private readonly laneOutages: Partial<Record<JobLane, OutageBackoff>>;
 	private readonly resolveTarget: typeof resolveAbuseTarget;
 	private readonly services: WorkerServices;
 	private stopped = true;
@@ -138,6 +163,8 @@ export class AbuseWorker {
 		this.controlJobTimeoutMs = boundedTimeout(options.controlJobTimeoutMs ?? DEFAULT_CONTROL_JOB_TIMEOUT_MS, DEFAULT_CONTROL_JOB_TIMEOUT_MS);
 		this.externalJobTimeoutMs = boundedTimeout(options.externalJobTimeoutMs ?? DEFAULT_EXTERNAL_JOB_TIMEOUT_MS, DEFAULT_EXTERNAL_JOB_TIMEOUT_MS);
 		this.sweepJobTimeoutMs = boundedTimeout(options.sweepJobTimeoutMs ?? DEFAULT_SWEEP_JOB_TIMEOUT_MS, DEFAULT_SWEEP_JOB_TIMEOUT_MS);
+		this.abortGraceMs = Math.max(0, options.abortGraceMs ?? DEFAULT_ABORT_GRACE_MS);
+		this.laneOutages = { visit: new OutageBackoff(options.visitOutageBackoffMs ?? OUTAGE_BACKOFF_MS) };
 		this.processJobOverride = options.processJob;
 		this.resolveTarget = options.resolveTarget ?? resolveAbuseTarget;
 		this.investigateReport = options.investigateReport ?? runReportInvestigation;
@@ -178,7 +205,7 @@ export class AbuseWorker {
 		// therefore never consume the capacity reserved for resolution,
 		// reconciliation, and inbound correspondence jobs.
 		const slots: Record<JobLane, number> = { control: this.controlConcurrency, external: this.externalConcurrency, sweep: 1, link: 1, discovery: 1, liveness: 1, visit: this.visitConcurrency };
-		this.loopPromises = JOB_LANES.flatMap((lane) => Array.from({ length: slots[lane] }, () => this.runLoop(laneFilter(lane, slots[lane]))));
+		this.loopPromises = JOB_LANES.flatMap((lane) => Array.from({ length: slots[lane] }, () => this.runLoop(lane, laneFilter(lane, slots[lane]))));
 		this.stopSamplePurge = startSamplePurgeSchedule();
 	}
 
@@ -191,8 +218,14 @@ export class AbuseWorker {
 		this.loopPromises = [];
 	}
 
-	private async runLoop(filter: JobClaimFilter): Promise<void> {
+	private async runLoop(lane: JobLane, filter: JobClaimFilter): Promise<void> {
 		while (!this.stopped) {
+			// A paused lane claims nothing; it naps in poll-sized steps so a stop is never held up.
+			const pausedMs = this.laneOutages[lane]?.remainingMs() ?? 0;
+			if (pausedMs > 0) {
+				await sleep(Math.min(pausedMs, this.pollMs));
+				continue;
+			}
 			try {
 				const processed = await this.processOne(filter);
 				if (!processed) await sleep(this.pollMs);
@@ -213,10 +246,16 @@ export class AbuseWorker {
 				console.error(`Failed to renew abuse job ${job.id.toString()} lease:`, error);
 			});
 		}, Math.max(1_000, Math.floor(this.leaseMs / 3)));
+		const outage = this.laneOutages[JOB_POLICY[job.jobType].lane];
 		try {
 			await this.runJobWithDeadline(job, controller, jobTimeoutMs(job.jobType, { control: this.controlJobTimeoutMs, external: this.externalJobTimeoutMs, sweep: this.sweepJobTimeoutMs, liveness: LIVENESS_JOB_TIMEOUT_MS }));
+			outage?.recordSuccess();
 			await AbuseRepository.completeJob(job.id, this.owner);
 		} catch (error) {
+			if (outage && isBrowserUnavailable(error)) {
+				const pauseMs = outage.recordOutage();
+				console.warn(`No browser for ${job.jobType} job ${job.id.toString()}; its lane claims nothing for ${pauseMs / 1_000} s.`);
+			}
 			await this.settleFailedJob(job, error);
 		} finally {
 			clearInterval(heartbeat);
@@ -253,8 +292,10 @@ export class AbuseWorker {
 	 * Enforce a deadline independently of provider SDK cancellation support.
 	 * The signal is propagated to code-owned adapters, while the detached
 	 * promise is observed so a late rejection cannot become an unhandled
-	 * process-level rejection. A timed-out operation is fenced below according
-	 * to its durable external-boundary state.
+	 * process-level rejection. An interrupted operation gets `abortGraceMs`
+	 * to wind down (cancel its browser lease) before the job is settled, so
+	 * a retry never runs beside the old attempt. A timed-out operation is
+	 * fenced below according to its durable external-boundary state.
 	 */
 	private async runJobWithDeadline(job: Job, controller: AbortController, timeoutMs: number): Promise<void> {
 		const operation = this.processJobOverride
@@ -274,13 +315,23 @@ export class AbuseWorker {
 				reject(timeout);
 			}, timeoutMs);
 		});
-		operation.catch(() => undefined);
+		const settled = operation.then(() => undefined, () => undefined);
 		try {
 			await Promise.race([operation, interruption, deadline]);
+		} catch (error) {
+			if (controller.signal.aborted) await this.awaitWindDown(job, settled);
+			throw error;
 		} finally {
 			if (timer) clearTimeout(timer);
 			removeAbortListener?.();
 		}
+	}
+
+	/** Wait at most `abortGraceMs` for an interrupted job's work to end. */
+	private async awaitWindDown(job: Job, settled: Promise<void>): Promise<void> {
+		await raceTimeout(settled, this.abortGraceMs, () => new Error("grace elapsed")).catch(() => {
+			console.warn(`Abuse job ${job.id.toString()} (${job.jobType}) still ran ${this.abortGraceMs} ms after its interruption; settling it anyway.`);
+		});
 	}
 
 	private async handleInterruptedJob(

@@ -1,4 +1,5 @@
-import { FABRIC_EGRESS_LABEL, type FabricEgress } from "../../browser/fabric";
+import { FABRIC_EGRESS_LABEL, isBrowserUnavailable, type FabricEgress } from "../../browser/fabric";
+import { isAbortError } from "../../util/abort";
 import { errorText } from "../../util/error_text";
 
 /**
@@ -23,9 +24,26 @@ export class WebsiteCaptureFailedError extends Error {
 	}
 }
 
-/** Whether a capture failure came from the browser service rather than the site. */
+/**
+ * The site's host name is gone from DNS (confirmed NXDOMAIN): the site is
+ * offline, and visiting it again cannot change that.
+ */
+export class WebsiteHostOfflineError extends Error {
+	readonly retryable = false as const;
+
+	constructor(readonly hostname: string, options?: { cause?: unknown }) {
+		super(`${hostname} no longer resolves in DNS (offline)`, options);
+		this.name = "WebsiteHostOfflineError";
+	}
+}
+
+/**
+ * Whether a capture failure came from the browser service rather than the
+ * site. A verdict about the site and a cancelled capture never are.
+ */
 export function isBrowserInfrastructureFailure(error: unknown): boolean {
-	if (error instanceof WebsiteUnreachableError || error instanceof WebsiteCaptureFailedError) return false;
+	// A missing browser (`BrowserUnavailableError`) belongs to the worker's outage pause, not a local capture retry loop.
+	if (error instanceof WebsiteUnreachableError || error instanceof WebsiteCaptureFailedError || error instanceof WebsiteHostOfflineError || isBrowserUnavailable(error) || isAbortError(error)) return false;
 	return error instanceof BrowserInfrastructureError || BROWSER_INFRASTRUCTURE_FAILURE.test(errorText(error));
 }
 

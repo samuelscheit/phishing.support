@@ -16,7 +16,12 @@ import {
 	isFabricBrowserSessionId,
 } from "./fabric_session";
 import { asError, errorSummary, errorText } from "../util/error_text";
+import { errorChain } from "../util/error_chain";
+import { abortable } from "../util/abort";
+import { deadline } from "../util/async";
+import { Semaphore, type SemaphoreRelease } from "../util/semaphore";
 import { sleep, type Sleep } from "../util/sleep";
+import { asRecord } from "../util/values";
 import { type FetchLike } from "../http/fetch";
 
 export type FabricScalar = string | number | boolean | null;
@@ -59,6 +64,19 @@ export interface FabricSessionOptions {
 	egress?: FabricEgress;
 	/** Explicitly opt into a recorder plus one automation client. */
 	maxExternalConnections?: 1 | 2;
+	/**
+	 * Fabric's create key; a retried create with the same key gets the same
+	 * session instead of a second one. Random per lease by default; a caller
+	 * that retries a lease itself passes its own.
+	 */
+	idempotencyKey?: string;
+	/**
+	 * Bounds the whole lease. Aborting it while the lease waits for a slot, is
+	 * created, or connects rejects with the signal's own reason (never a
+	 * `BrowserUnavailableError`) and cancels any session already created;
+	 * aborting it later cancels the held lease.
+	 */
+	signal?: AbortSignal;
 }
 export interface FabricBrowserConfig {
 	baseUrl: string;
@@ -84,11 +102,6 @@ type FabricSessionStatus =
 	| "cancelled"
 	| "failed"
 	| "timed_out";
-
-type FabricSessionResponse = {
-	id: string;
-	status: FabricSessionStatus;
-};
 
 /**
  * A Fabric browser lease for a raw-CDP client (the browser task agent). The
@@ -133,12 +146,64 @@ export class BrowserUnavailableError extends Error {
 
 /** Whether `error`, or any error in its `cause` chain, is a `BrowserUnavailableError`. */
 export function isBrowserUnavailable(error: unknown): boolean {
-	const seen = new Set<unknown>();
-	for (let current = error; current instanceof Error && !seen.has(current); current = current.cause) {
-		if (current instanceof BrowserUnavailableError) return true;
-		seen.add(current);
+	return errorChain(error).some((entry) => entry instanceof BrowserUnavailableError);
+}
+
+/**
+ * How many Fabric browsers this process leases at once:
+ * `FABRIC_MAX_LOCAL_LEASES`, else one fewer than Fabric's own limit
+ * (`FABRIC_MAX_ACTIVE_BROWSER_LEASES`, 4 by default), so this process never
+ * takes Fabric's last browser.
+ */
+export function fabricLeaseLimitFromEnvironment(environment: FabricEnvironment = process.env): number {
+	const count = (name: string) => {
+		const value = environment[name]?.trim();
+		return value && /^[1-9][0-9]{0,5}$/.test(value) ? Number(value) : undefined;
+	};
+	return count("FABRIC_MAX_LOCAL_LEASES") ?? Math.max(1, (count("FABRIC_MAX_ACTIVE_BROWSER_LEASES") ?? 4) - 1);
+}
+
+/**
+ * How long a lease waits for a free local slot before the work is told no
+ * browser is available: a job then waits without spending its attempts
+ * instead of holding its worker slot (see `RELAY_CAPACITY_WAIT_MS`).
+ */
+const LEASE_SLOT_WAIT_MS = 2 * 60_000;
+
+type FabricLeaseSlots = { semaphore: Semaphore; waitMs: number };
+let leaseSlots: FabricLeaseSlots | undefined;
+
+function fabricLeaseSlots(): FabricLeaseSlots {
+	return leaseSlots ??= { semaphore: new Semaphore(fabricLeaseLimitFromEnvironment()), waitMs: LEASE_SLOT_WAIT_MS };
+}
+
+/**
+ * Replace this process's lease slots: `limit` leases at once (the
+ * environment's by default), each waiting at most `waitMs` for a slot.
+ * Without options the next lease reads the environment again. Leases held
+ * meanwhile give their slot back to the slots they took it from.
+ */
+export function configureFabricLeases(options: { limit?: number; waitMs?: number } = {}): void {
+	leaseSlots = options.limit === undefined && options.waitMs === undefined
+		? undefined
+		: { semaphore: new Semaphore(options.limit ?? fabricLeaseLimitFromEnvironment()), waitMs: options.waitMs ?? LEASE_SLOT_WAIT_MS };
+}
+
+/** This process's lease slots right now: the limit, how many are free, and how many leases wait for one. */
+export function fabricLeaseUsage(): { limit: number; available: number; waiting: number } {
+	const { semaphore } = fabricLeaseSlots();
+	return { limit: semaphore.capacity, available: semaphore.available, waiting: semaphore.waiting };
+}
+
+/** One local lease slot, waiting at most the configured time; the caller's abort rejects with its own reason. */
+async function acquireLeaseSlot(signal: AbortSignal | undefined): Promise<SemaphoreRelease> {
+	const { semaphore, waitMs } = fabricLeaseSlots();
+	try {
+		return await semaphore.acquire(deadline(waitMs, signal));
+	} catch (error) {
+		if (signal?.aborted) throw signal.reason;
+		throw new BrowserUnavailableError(new Error(`all ${semaphore.capacity} browser leases of this process stayed busy for ${Math.round(waitMs / 1_000)} s`, { cause: error }));
 	}
-	return false;
 }
 
 function requiredEnvironment(environment: FabricEnvironment, name: string): string {
@@ -289,12 +354,39 @@ function resourceUrl(config: FabricBrowserConfig, path: string): string {
 	return `${config.baseUrl}${path}`;
 }
 
+/** Every Fabric API call ends within this, response body included. */
+const FABRIC_REQUEST_TIMEOUT_MS = 30_000;
+/** A create that failed in transit or with a Fabric 5xx is sent once more, under the same idempotency key. */
+const CREATE_ATTEMPTS = 2;
+const CREATE_RETRY_MS = 500;
+
+/** A failed Fabric API call: `status` is Fabric's HTTP answer, undefined when none arrived. */
+export class FabricRequestError extends Error {
+	constructor(message: string, readonly status?: number, options?: { cause?: unknown }) {
+		super(message, options);
+		this.name = "FabricRequestError";
+	}
+
+	/** Whether sending the same request again may succeed: no answer, or Fabric's own trouble. */
+	get transient(): boolean {
+		return this.status === undefined || this.status === 408 || this.status === 429 || this.status >= 500;
+	}
+}
+
+/**
+ * One Fabric API call, bounded by `FABRIC_REQUEST_TIMEOUT_MS`. A failure is a
+ * `FabricRequestError` that names Fabric's HTTP status, with its problem
+ * `detail` when the body has one. Callers never abort a call mid-flight: a
+ * create Fabric already acted on would leave its session unknown
+ * (`leaseFabricSession` races the call instead and cancels what it returns).
+ */
 async function fabricRequest<T>(
 	config: FabricBrowserConfig,
 	path: string,
 	init: { method?: string; body?: unknown; idempotencyKey?: string } = {},
 ): Promise<T> {
 	let response: Response;
+	let body: unknown;
 	try {
 		response = await (config.fetch ?? globalThis.fetch)(resourceUrl(config, path), {
 			method: init.method ?? "GET",
@@ -304,15 +396,16 @@ async function fabricRequest<T>(
 				...(init.idempotencyKey === undefined ? {} : { "idempotency-key": init.idempotencyKey }),
 			},
 			...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+			signal: AbortSignal.timeout(FABRIC_REQUEST_TIMEOUT_MS),
 		});
-	} catch {
-		throw new Error("Browser Fabric transport request failed");
+		body = await response.json().catch(() => undefined);
+	} catch (error) {
+		throw new FabricRequestError(`Browser Fabric transport request failed (${errorSummary(error)})`, undefined, { cause: error });
 	}
-
-	const body = await response.json().catch(() => ({}));
 	if (!response.ok) {
-		const problem = body as { detail?: unknown };
-		throw new Error(typeof problem.detail === "string" ? problem.detail : `Browser Fabric request failed (${response.status})`);
+		const detail = asRecord(body)?.detail;
+		const explained = typeof detail === "string" && detail.trim() ? `: ${detail.trim()}` : "";
+		throw new FabricRequestError(`Browser Fabric request failed (HTTP ${response.status})${explained}`, response.status);
 	}
 	return body as T;
 }
@@ -321,21 +414,32 @@ async function sessionAction(config: FabricBrowserConfig, sessionId: string, act
 	await fabricRequest(config, `/browser-sessions/${encodeURIComponent(assertFabricBrowserSessionId(sessionId))}/${action}`, { method: "POST" });
 }
 
+/**
+ * Create a session. A create lost in transit or refused by Fabric's own
+ * trouble is sent once more under the same idempotency key, so a dropped
+ * response never leaves a second, orphaned session behind. The create itself
+ * is never aborted mid-flight (Fabric may have made the session already);
+ * `signal` only stops the retry.
+ */
 async function acquireFabricSession(
 	config: FabricBrowserConfig,
 	metadata: Record<string, FabricScalar>,
-	{ leaseMode = "writer", egress = "phishing", maxExternalConnections = 1 }: FabricSessionOptions,
+	{ leaseMode = "writer", egress = "phishing", maxExternalConnections = 1, idempotencyKey = `phishing-${crypto.randomUUID()}`, signal }: FabricSessionOptions,
 ): Promise<string> {
-	const idempotencyKey = `phishing-${crypto.randomUUID()}`;
-	const created = await fabricRequest<FabricSessionResponse>(config, "/browser-sessions", {
-		method: "POST",
-		idempotencyKey,
-		body: buildFabricBrowserSessionCreatePayload(config, metadata, leaseMode, idempotencyKey, egress, maxExternalConnections),
-	});
-	const sessionId = assertFabricBrowserSessionId(created.id);
-	if (TERMINAL_SESSION_STATUSES.has(created.status)) {
-		throw new Error(`Browser Fabric session ended in ${created.status}`);
+	const body = buildFabricBrowserSessionCreatePayload(config, metadata, leaseMode, idempotencyKey, egress, maxExternalConnections);
+	let created: Record<string, unknown> | undefined;
+	for (let attempt = 1; !created; attempt++) {
+		try {
+			created = asRecord(await fabricRequest<unknown>(config, "/browser-sessions", { method: "POST", idempotencyKey, body })) ?? {};
+		} catch (error) {
+			if (attempt >= CREATE_ATTEMPTS || !(error instanceof FabricRequestError && error.transient)) throw error;
+			await sleep(CREATE_RETRY_MS, signal);
+			signal?.throwIfAborted();
+		}
 	}
+	const sessionId = assertFabricBrowserSessionId(typeof created.id === "string" ? created.id : "");
+	const status = created.status as FabricSessionStatus | undefined;
+	if (status && TERMINAL_SESSION_STATUSES.has(status)) throw new Error(`Browser Fabric session ended in ${status}`);
 	// Do not poll the session resource here. A ready response carries an
 	// ephemeral CDP capability intended solely for the mTLS relay sidecar. The
 	// caller opens the fixed relay route immediately; the relay waits for
@@ -383,22 +487,26 @@ function isRelayCapacityError(error: unknown): boolean {
 export async function connectThroughRelay<T>(
 	connect: () => Promise<T>,
 	heartbeat: () => Promise<void>,
-	options: { waitMs?: number; retryMs?: number; sleep?: Sleep } = {},
+	options: { waitMs?: number; retryMs?: number; sleep?: Sleep; signal?: AbortSignal } = {},
 ): Promise<T> {
+	const { signal } = options;
 	const waitMs = options.waitMs ?? RELAY_CAPACITY_WAIT_MS;
 	const retryMs = options.retryMs ?? RELAY_CAPACITY_RETRY_MS;
-	const wait = options.sleep ?? sleep;
-	const deadline = Date.now() + waitMs;
+	const wait = options.sleep ?? ((ms: number) => sleep(ms, signal));
+	const giveUpAt = Date.now() + waitMs;
 	let lastHeartbeat = Date.now();
 	for (;;) {
+		signal?.throwIfAborted();
 		try {
 			return await connect();
 		} catch (thrown) {
+			signal?.throwIfAborted();
 			// Under Bun the CDP WebSocket handshake rejects with an ErrorEvent, not an Error.
 			const error = asError(thrown);
-			if (!isRelayCapacityError(error) || Date.now() >= deadline) throw error;
+			if (!isRelayCapacityError(error) || Date.now() >= giveUpAt) throw error;
 		}
 		await wait(retryMs);
+		signal?.throwIfAborted();
 		if (Date.now() - lastHeartbeat >= SESSION_HEARTBEAT_MS) {
 			lastHeartbeat = Date.now();
 			await heartbeat().catch(() => undefined);
@@ -429,39 +537,65 @@ interface FabricLease<T> {
 }
 
 /**
- * The one lifecycle every Fabric client shares: acquire a session, connect a
- * client to it (cancelling the session if that fails), heartbeat the lease,
- * and finish it exactly once with `release` (work done) or `cancel` (outcome
- * unknown). Finishing stops the heartbeat, drops the client transport, then
- * tells Fabric. A session that cannot be acquired or connected is a
- * `BrowserUnavailableError`.
+ * The one lifecycle every Fabric client shares: take one of the process's
+ * lease slots, acquire a session, connect a client to it (cancelling the
+ * session if that fails), heartbeat the lease, and finish it exactly once
+ * with `release` (work done) or `cancel` (outcome unknown). Finishing stops
+ * the heartbeat, drops the client transport, tells Fabric, then frees the
+ * slot. A session that cannot be leased, acquired or connected is a
+ * `BrowserUnavailableError`; an abort of `options.signal` rejects with its
+ * own reason, cancels whatever was created, and later cancels the lease.
  */
 async function leaseFabricSession<T>(
 	config: FabricBrowserConfig,
 	metadata: Record<string, FabricScalar>,
 	options: FabricSessionOptions,
-	connect: (sessionId: string) => Promise<FabricClientConnection<T>>,
+	connect: (sessionId: string, signal?: AbortSignal) => Promise<FabricClientConnection<T>>,
 ): Promise<FabricLease<T>> {
-	const sessionId = await acquireFabricSession(config, metadata, options).catch((error: unknown) => {
-		throw new BrowserUnavailableError(error);
-	});
-	let client: FabricClientConnection<T>;
+	const { signal } = options;
+	const releaseSlot = await acquireLeaseSlot(signal);
+	const cancelSession = (sessionId: string) => sessionAction(config, sessionId, "cancel").catch(() => undefined);
+	let sessionId: string | undefined;
+	let client: FabricClientConnection<T> | undefined;
+	let create: Promise<string> | undefined;
 	try {
-		client = await connect(sessionId);
+		// A create still in flight at the abort may yet make a session: keep the slot until it settles and is cancelled.
+		create = acquireFabricSession(config, metadata, options);
+		sessionId = await abortable(create, signal, async (lateId) => {
+			await cancelSession(lateId);
+			releaseSlot();
+		});
+		client = await abortable(connect(sessionId, signal), signal, (late) => late.disconnect?.());
+		signal?.throwIfAborted();
 	} catch (error) {
-		await sessionAction(config, sessionId, "cancel").catch(() => undefined);
+		await client?.disconnect?.().catch(() => undefined);
+		if (sessionId) {
+			await cancelSession(sessionId);
+			releaseSlot();
+		} else if (signal?.aborted && create) {
+			// If `create` rejects late, release the slot then; if it resolves late, `abortable`'s discard cancels and releases.
+			void create.catch(() => releaseSlot());
+		} else {
+			releaseSlot();
+		}
+		if (signal?.aborted) throw signal.reason;
 		throw new BrowserUnavailableError(error);
 	}
-	const stopHeartbeat = startSessionHeartbeat(config, sessionId);
+	const leasedId = sessionId;
+	const stopHeartbeat = startSessionHeartbeat(config, leasedId);
 	let finished = false;
 	const finish = async (action: "release" | "cancel") => {
 		if (finished) return;
 		finished = true;
+		signal?.removeEventListener("abort", onAbort);
 		stopHeartbeat();
 		await client.disconnect?.().catch(() => undefined);
-		await sessionAction(config, sessionId, action).catch(() => undefined);
+		await sessionAction(config, leasedId, action).catch(() => undefined);
+		releaseSlot();
 	};
-	return { id: sessionId, value: client.value, release: () => finish("release"), cancel: () => finish("cancel") };
+	const onAbort = () => { void finish("cancel"); };
+	signal?.addEventListener("abort", onAbort, { once: true });
+	return { id: leasedId, value: client.value, release: () => finish("release"), cancel: () => finish("cancel") };
 }
 
 async function allowInsecureCertificates(browser: PatchrightBrowser): Promise<void> {
@@ -490,7 +624,7 @@ function requiredConfig(config = fabricBrowserConfigFromEnvironment()): FabricBr
  */
 export async function acquireFabricCdpSession(
 	metadata: Record<string, FabricScalar> = {},
-	options: Pick<FabricSessionOptions, "egress"> = {},
+	options: Pick<FabricSessionOptions, "egress" | "idempotencyKey" | "signal"> = {},
 	config: FabricBrowserConfig = requiredConfig(),
 ): Promise<FabricCdpSession> {
 	const lease = await leaseFabricSession(config, metadata, { ...options, leaseMode: "clone" }, async (sessionId) => ({
@@ -508,24 +642,30 @@ export async function cancelFabricBrowserSession(sessionId: string): Promise<voi
 	await sessionAction(requiredConfig(), sessionId, "cancel");
 }
 
-/** Connect Rebrowser to a Fabric relay and map close/disconnect to lease release. */
+/**
+ * Connect Rebrowser to a Fabric relay and map close/disconnect to lease
+ * release. A browser that drops on its own (Fabric ended it) cancels the
+ * lease, which frees its slot.
+ */
 export async function acquireFabricPuppeteerBrowser(
 	metadata: Record<string, FabricScalar> = {},
 	options: FabricSessionOptions = {},
+	config: FabricBrowserConfig = requiredConfig(),
 ): Promise<{ browser: PuppeteerBrowser; sessionId: string; release(): Promise<void> }> {
-	const config = requiredConfig();
-	const lease = await leaseFabricSession(config, metadata, options, async (sessionId) => {
+	const lease = await leaseFabricSession(config, metadata, options, async (sessionId, signal) => {
 		const module = await import("rebrowser-puppeteer-core");
 		const browser = await connectThroughRelay(
 			() => module.connect({ browserWSEndpoint: fabricRelayEndpoint(sessionId), acceptInsecureCerts: true }),
 			() => sessionAction(config, sessionId, "heartbeat"),
+			{ signal },
 		);
 		return { value: browser, disconnect: browser.disconnect.bind(browser) };
 	});
 	const { value: browser, release } = lease;
 	(browser as unknown as { close: () => Promise<void> }).close = release;
 	(browser as unknown as { disconnect: () => Promise<void> }).disconnect = release;
-	browser.once?.("disconnected", () => { void release(); });
+	browser.once?.("disconnected", () => { void lease.cancel(); });
+	if (browser.connected === false) void lease.cancel();
 	return { browser, sessionId: lease.id, release };
 }
 
@@ -535,11 +675,12 @@ export async function acquireFabricPatchrightSession(
 	options: FabricSessionOptions = {},
 	config: FabricBrowserConfig = requiredConfig(),
 ): Promise<FabricPatchrightSession> {
-	const lease = await leaseFabricSession(config, metadata, options, async (sessionId) => {
+	const lease = await leaseFabricSession(config, metadata, options, async (sessionId, signal) => {
 		const { chromium } = await import("patchright");
 		const browser = await connectThroughRelay(
 			() => chromium.connectOverCDP(fabricRelayEndpoint(sessionId), { timeout: PATCHRIGHT_CONNECT_TIMEOUT_MS }),
 			() => sessionAction(config, sessionId, "heartbeat"),
+			{ signal },
 		);
 		// For a browser connected over CDP, Patchright's own close only closes
 		// this client's CDP WebSocket (its "browser process" is that transport);
@@ -560,5 +701,8 @@ export async function acquireFabricPatchrightSession(
 		}
 	});
 	lease.value.browser.close = lease.release;
+	// A browser that drops on its own (Fabric ended it) cancels the lease, which frees its slot.
+	lease.value.browser.once("disconnected", () => { void lease.cancel(); });
+	if (!lease.value.browser.isConnected()) void lease.cancel();
 	return { id: lease.id, ...lease.value, release: lease.release, cancel: lease.cancel };
 }
