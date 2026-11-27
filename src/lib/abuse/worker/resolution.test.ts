@@ -7,7 +7,7 @@ import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
-import { abuseJobs } from "../schema";
+import { jobs } from "../schema";
 import { AbuseWorker } from "./";
 import { IncompleteResolutionError, RESOLUTION_LOOKUP_RETRIES, resolveReport } from "./resolution";
 
@@ -63,9 +63,9 @@ describe("direct provider resolution and dispatch", () => {
 		const [route] = await AbuseRepository.listRoutes(created.reportId);
 		expect(route).toMatchObject({ routeType: "provider_submission", status: "verified" });
 		const db = await getDb();
-		const jobs = db.select().from(abuseJobs).where(eq(abuseJobs.routeId, route!.id)).all();
-		expect(jobs).toHaveLength(1);
-		expect(jobs[0]).toMatchObject({
+		const queuedJobs = db.select().from(jobs).where(eq(jobs.routeId, route!.id)).all();
+		expect(queuedJobs).toHaveLength(1);
+		expect(queuedJobs[0]).toMatchObject({
 			jobType: "submit_provider",
 			reportId: created.reportId,
 			routeId: route!.id,
@@ -92,7 +92,7 @@ describe("direct provider resolution and dispatch", () => {
 		// automatically-created resolver job so this worker invocation exercises
 		// the direct-provider job rather than performing a real resolver lookup.
 		const db = await getDb();
-		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.reportId, created.reportId)).run();
+		db.update(jobs).set({ status: "completed" }).where(eq(jobs.reportId, created.reportId)).run();
 		await AbuseRepository.enqueueJob({
 			jobType: "submit_provider",
 			reportId: created.reportId,
@@ -105,7 +105,7 @@ describe("direct provider resolution and dispatch", () => {
 		expect(await worker.processOne()).toBeTrue();
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "needs_human" });
 
-		const [job] = db.select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all();
+		const [job] = db.select().from(jobs).where(eq(jobs.routeId, route.id)).all();
 		expect(job).toMatchObject({ jobType: "submit_provider", status: "completed" });
 	});
 
@@ -161,7 +161,7 @@ describe("direct provider resolution and dispatch", () => {
 		const db = await getDb();
 		// These fixtures install their routes directly; retire the automatic
 		// resolver jobs except for the one used to prove the control lane works.
-		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.reportId, external.reportId)).run();
+		db.update(jobs).set({ status: "completed" }).where(eq(jobs.reportId, external.reportId)).run();
 		const [externalTarget] = await AbuseRepository.listTargets(external.reportId);
 		if (!externalTarget) throw new Error("External timeout fixture has no target.");
 		const route = await AbuseRepository.upsertResolvedRoute(externalTarget.id, {
@@ -218,7 +218,7 @@ describe("direct provider resolution and dispatch", () => {
 			await worker.stop();
 		}
 
-		expect(db.select().from(abuseJobs).where(eq(abuseJobs.id, externalJob.id)).get()).toMatchObject({
+		expect(db.select().from(jobs).where(eq(jobs.id, externalJob.id)).get()).toMatchObject({
 			status: "unknown_external_state",
 			unknownExternalState: true,
 		});
@@ -229,7 +229,7 @@ describe("direct provider resolution and dispatch", () => {
 	test("retries an external timeout before any durable provider run exists", async () => {
 		const created = await createReport("preflight-timeout.example.com");
 		const db = await getDb();
-		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.reportId, created.reportId)).run();
+		db.update(jobs).set({ status: "completed" }).where(eq(jobs.reportId, created.reportId)).run();
 		const [target] = await AbuseRepository.listTargets(created.reportId);
 		if (!target) throw new Error("Preflight timeout fixture has no target.");
 		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
@@ -267,7 +267,7 @@ describe("direct provider resolution and dispatch", () => {
 		await worker.start();
 		try {
 			await waitFor(async () => {
-				const current = db.select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get();
+				const current = db.select().from(jobs).where(eq(jobs.id, job.id)).get();
 				return current?.status === "queued" && current.retryCount === 1;
 			}, 3_000);
 		} finally {
@@ -281,7 +281,7 @@ describe("direct provider resolution and dispatch", () => {
 	test("settles a retry-exhausted direct-provider preflight with its retained error", async () => {
 		const created = await createReport("cloudflare-preflight.example.com");
 		const db = await getDb();
-		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.reportId, created.reportId)).run();
+		db.update(jobs).set({ status: "completed" }).where(eq(jobs.reportId, created.reportId)).run();
 		const [target] = await AbuseRepository.listTargets(created.reportId);
 		if (!target) throw new Error("Retry-exhaustion fixture has no target.");
 		const route = await AbuseRepository.upsertResolvedRoute(target.id, {
@@ -309,7 +309,7 @@ describe("direct provider resolution and dispatch", () => {
 			payload: {},
 			dedupeKey: `cloudflare-preflight-retry-exhaustion:${route.id.toString()}`,
 		});
-		db.update(abuseJobs).set({ retryCount: 8 }).where(eq(abuseJobs.id, job.id)).run();
+		db.update(jobs).set({ retryCount: 8 }).where(eq(jobs.id, job.id)).run();
 		const failure = "goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://abuse.cloudflare.com/phishing";
 		const worker = new AbuseWorker({
 			owner: "worker-preflight-retry-exhaustion-test",
@@ -319,7 +319,7 @@ describe("direct provider resolution and dispatch", () => {
 		});
 
 		expect(await worker.processOne({ jobTypes: ["submit_provider"] })).toBeTrue();
-		expect(db.select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({
+		expect(db.select().from(jobs).where(eq(jobs.id, job.id)).get()).toMatchObject({
 			status: "failed",
 			retryCount: 8,
 			lastError: failure,
@@ -379,7 +379,7 @@ describe("a resolution whose lookups failed", () => {
 		const routes = await AbuseRepository.listRoutes(created.reportId);
 		expect(routes.map((route) => route.providerDisplayName).sort()).toEqual(["Netcraft", "Render Abuse Contact"]);
 		const db = await getDb();
-		expect(db.select().from(abuseJobs).where(eq(abuseJobs.reportId, created.reportId)).all().map((job) => job.jobType).filter((type) => type !== "resolve_report").sort()).toEqual(["check_site_liveness", "send_email", "submit_provider"]);
+		expect(db.select().from(jobs).where(eq(jobs.reportId, created.reportId)).all().map((job) => job.jobType).filter((type) => type !== "resolve_report").sort()).toEqual(["check_site_liveness", "send_email", "submit_provider"]);
 	});
 
 	test("keeps what it found once the retries are spent, so the report still goes out", async () => {
@@ -392,7 +392,7 @@ describe("a resolution whose lookups failed", () => {
 
 describe("a resolved case report", () => {
 	const noRoutes = async () => ({ status: "resolved" as const, resolverSnapshot: { source: "campaign_link_test" }, routes: [] });
-	const linkJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "link_campaign")).all();
+	const linkJobs = async () => (await getDb()).select().from(jobs).where(eq(jobs.jobType, "link_campaign")).all();
 
 	test("links every site its case confirmed, each by its own report, and a case that joined it only through its own resolution", async () => {
 		const sites = ["https://lure-resolve-test.com/", "https://kit-resolve-test.com/login"];

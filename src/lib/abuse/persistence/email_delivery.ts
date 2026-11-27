@@ -4,7 +4,7 @@ import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
 import {
 	abuseEvents,
-	abuseJobs,
+	jobs,
 	abuseMailMessages,
 	abuseProviderRoutes,
 	abuseProviderRuns,
@@ -13,6 +13,7 @@ import {
 	type AbuseRouteStatus,
 	type AbuseRunStatus,
 } from "../schema";
+import { activeJobByDedupeKey, insertQueuedJob } from "./jobs";
 import { recomputeReportStatusInTransaction } from "./report_status";
 import { claimRoute, insertProviderRun, now, recordEvent } from "./shared";
 import { hashStableJson } from "../../util/hash";
@@ -298,42 +299,15 @@ export async function settleCorrelatedEmailBounce(params: {
 			});
 
 			const dedupeKey = `email-retry:${route.id.toString()}:${inbound.id.toString()}`;
-			const existingRetry = tx
-				.select({ id: abuseJobs.id })
-				.from(abuseJobs)
-				.where(
-					and(
-						eq(abuseJobs.dedupeKey, dedupeKey),
-						inArray(abuseJobs.status, ["queued", "running", "unknown_external_state"]),
-					),
-				)
-				.get();
-			if (params.retry && !existingRetry) {
-				const jobId = generateId();
-				tx.insert(abuseJobs)
-					.values({
-						id: jobId,
-						jobType: "send_email",
-						reportId: route.reportId,
-						routeId: route.id,
-						payload: { retryReason: "provider_bounce", bouncedOutboundMessageId: outbound.id.toString(), inboundMessageId: inbound.id.toString() },
-						dedupeKey,
-						status: "queued",
-						retryCount: 0,
-						nextAttemptAt: new Date(timestamp.getTime() + (params.retryAfterMs ?? 60_000)),
-						unknownExternalState: false,
-						createdAt: timestamp,
-						updatedAt: timestamp,
-					})
-					.run();
-				recordEvent(tx, {
+			if (params.retry && !activeJobByDedupeKey(tx, dedupeKey)) {
+				insertQueuedJob(tx, {
+					jobType: "send_email",
 					reportId: route.reportId,
 					routeId: route.id,
-					runId: run.id,
-					jobId,
-					eventType: "job.queued",
-					data: { jobType: "send_email", reason: "provider_bounce", inboundMessageId: inbound.id.toString() },
-				});
+					payload: { retryReason: "provider_bounce", bouncedOutboundMessageId: outbound.id.toString(), inboundMessageId: inbound.id.toString() },
+					dedupeKey,
+					nextAttemptAt: new Date(timestamp.getTime() + (params.retryAfterMs ?? 60_000)),
+				}, { reason: "provider_bounce", inboundMessageId: inbound.id.toString(), bouncedRunId: run.id.toString() });
 			}
 			recomputeReportStatusInTransaction(tx, route.reportId, {
 				reason: "provider_bounce",
@@ -365,8 +339,8 @@ export async function listRelayRefusedRoutes(): Promise<AbuseProviderRoute[]> {
 			.map((message) => [message.routeId, message.classification]),
 	);
 	const pending = new Set(
-		db.select({ routeId: abuseJobs.routeId }).from(abuseJobs)
-			.where(and(inArray(abuseJobs.routeId, ids), eq(abuseJobs.jobType, "send_email"), inArray(abuseJobs.status, ["queued", "running", "unknown_external_state"])))
+		db.select({ routeId: jobs.routeId }).from(jobs)
+			.where(and(inArray(jobs.routeId, ids), eq(jobs.jobType, "send_email"), inArray(jobs.status, ["queued", "running", "unknown_external_state"])))
 			.all()
 			.map((job) => job.routeId),
 	);

@@ -78,10 +78,10 @@ export const abuseRunStatuses = [
 ] as const;
 export type AbuseRunStatus = (typeof abuseRunStatuses)[number];
 
-export const abuseJobStatuses = ["queued", "running", "completed", "failed", "unknown_external_state"] as const;
-export type AbuseJobStatus = (typeof abuseJobStatuses)[number];
+export const jobStatuses = ["queued", "running", "completed", "failed", "unknown_external_state"] as const;
+export type JobStatus = (typeof jobStatuses)[number];
 
-export const abuseJobTypes = [
+export const jobTypes = [
 	"resolve_report",
 	"send_email",
 	"monitor_provider_reply",
@@ -106,8 +106,10 @@ export const abuseJobTypes = [
 	"report_host_move",
 	/** Take the due steps of a reported site's escalation ladder while it still serves what was reported (abuse/escalation). */
 	"escalate_target",
+	/** Visit a submitted website and analyze it (website/visit_queue): every website analysis runs as one. */
+	"visit_website",
 ] as const;
-export type AbuseJobType = (typeof abuseJobTypes)[number];
+export type JobType = (typeof jobTypes)[number];
 
 export const abuseMailDirections = ["outbound", "inbound"] as const;
 export type AbuseMailDirection = (typeof abuseMailDirections)[number];
@@ -359,17 +361,24 @@ export const abuseMailMessages = sqliteTable(
 );
 
 /** Durable worker jobs. No process-local stream is used as execution state. */
-export const abuseJobs = sqliteTable(
-	"abuse_jobs",
+export const jobs = sqliteTable(
+	"jobs",
 	{
 		id: sqliteBigint("id").primaryKey(),
-		jobType: text("job_type", { enum: abuseJobTypes }).notNull(),
+		jobType: text("job_type", { enum: jobTypes }).notNull(),
 		reportId: sqliteBigint("report_id").references(() => abuseReports.id, { onDelete: "cascade" }),
 		routeId: sqliteBigint("route_id").references(() => abuseProviderRoutes.id, { onDelete: "cascade" }),
 		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "cascade" }),
 		payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>(),
 		dedupeKey: text("dedupe_key"),
-		status: text("status", { enum: abuseJobStatuses }).notNull().default("queued"),
+		/**
+		 * The share a job counts against in a fair-share lane (`JobClaimFilter.fairShare`):
+		 * the reporter whose submission caused it, so one reporter cannot take every slot.
+		 */
+		fairKey: text("fair_key"),
+		/** At most one job per key runs at a time: a provider route's, a site group's visits. */
+		serialKey: text("serial_key"),
+		status: text("status", { enum: jobStatuses }).notNull().default("queued"),
 		leaseOwner: text("lease_owner"),
 		leaseExpiresAt: sqliteTimestamp("lease_expires_at"),
 		retryCount: sqliteInteger("retry_count").notNull().default(0),
@@ -380,9 +389,11 @@ export const abuseJobs = sqliteTable(
 		updatedAt: sqliteTimestamp("updated_at").notNull().default(sql`(unixepoch() * 1000)`),
 	},
 	(table) => [
-		index("abuse_jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt),
-		index("abuse_jobs_route_status_idx").on(table.routeId, table.status),
-		index("abuse_jobs_dedupe_idx").on(table.dedupeKey, table.status),
+		index("jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt),
+		index("jobs_route_status_idx").on(table.routeId, table.status),
+		index("jobs_dedupe_idx").on(table.dedupeKey, table.status),
+		index("jobs_serial_status_idx").on(table.serialKey, table.status),
+		index("jobs_type_fair_status_idx").on(table.jobType, table.fairKey, table.status),
 	]
 );
 
@@ -397,7 +408,7 @@ export const abuseEvents = sqliteTable(
 		targetId: sqliteBigint("target_id").references(() => abuseTargets.id, { onDelete: "set null" }),
 		routeId: sqliteBigint("route_id").references(() => abuseProviderRoutes.id, { onDelete: "set null" }),
 		runId: sqliteBigint("run_id").references(() => abuseProviderRuns.id, { onDelete: "set null" }),
-		jobId: sqliteBigint("job_id").references(() => abuseJobs.id, { onDelete: "set null" }),
+		jobId: sqliteBigint("job_id").references(() => jobs.id, { onDelete: "set null" }),
 		eventType: text("event_type").notNull(),
 		data: text("data", { mode: "json" }).$type<Record<string, unknown>>().notNull().default(sql`'{}'`),
 		createdAt: sqliteTimestamp("created_at").notNull().default(sql`(unixepoch() * 1000)`),
@@ -440,5 +451,5 @@ export type AbuseProviderRoute = InferSelectModel<typeof abuseProviderRoutes>;
 export type AbuseProviderRun = InferSelectModel<typeof abuseProviderRuns>;
 export type AbuseArtifact = InferSelectModel<typeof abuseArtifacts>;
 export type AbuseMailMessage = InferSelectModel<typeof abuseMailMessages>;
-export type AbuseJob = InferSelectModel<typeof abuseJobs>;
+export type Job = InferSelectModel<typeof jobs>;
 export type AbuseEvent = InferSelectModel<typeof abuseEvents>;

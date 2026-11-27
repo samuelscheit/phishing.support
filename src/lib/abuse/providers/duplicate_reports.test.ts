@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { AbuseRepository } from "../repository";
-import { abuseEvents, abuseJobs } from "../schema";
+import { abuseEvents, jobs } from "../schema";
 import { cloudflareProvider } from "./cloudflare";
 import { CLOUDFLARE_PROVIDER } from "./cloudflare/definition";
 import { cloudflareDraft, prepareCloudflareExternalSubmission, submitCloudflareSubmission } from "./cloudflare/submission";
@@ -67,7 +67,7 @@ async function latestRun(routeId: bigint) {
 
 async function pollJobs(routeId: bigint) {
 	const db = await getDb();
-	return db.select().from(abuseJobs).where(and(eq(abuseJobs.routeId, routeId), eq(abuseJobs.jobType, "poll_provider_correspondence"))).all();
+	return db.select().from(jobs).where(and(eq(jobs.routeId, routeId), eq(jobs.jobType, "poll_provider_correspondence"))).all();
 }
 
 describe("a duplicate answer settles the route as reported", () => {

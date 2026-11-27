@@ -253,6 +253,13 @@
       "when": 1795735758328,
       "tag": "0035_site_check_page_fingerprints",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1795739469104,
+      "tag": "0036_jobs_queue_keys",
+      "breakpoints": true
     }
   ]
 }

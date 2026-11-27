@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, ne, notExists, sql } from "drizzle-orm";
 
-import { abuseJobs, abuseReports, abuseTargets } from "../abuse/schema";
+import { jobs, abuseReports, abuseTargets } from "../abuse/schema";
 import { getDb } from "../db";
 import { generateId } from "../db/ids";
 import type { SiteCheckResult } from "./check";
@@ -75,9 +75,9 @@ export async function listLivenessTargets(options: { targetId?: bigint; withoutP
 			sql`json_array_length(${abuseTargets.observedUrls}) > 0`,
 			...(options.targetId === undefined ? [] : [eq(abuseTargets.id, options.targetId)]),
 			...(options.withoutPendingCheck
-				? [notExists(db.select({ id: abuseJobs.id }).from(abuseJobs).where(and(
-					eq(abuseJobs.dedupeKey, sql`${LIVENESS_JOB_KEY_PREFIX} || ${abuseTargets.id}`),
-					inArray(abuseJobs.status, ["queued", "running", "unknown_external_state"]),
+				? [notExists(db.select({ id: jobs.id }).from(jobs).where(and(
+					eq(jobs.dedupeKey, sql`${LIVENESS_JOB_KEY_PREFIX} || ${abuseTargets.id}`),
+					inArray(jobs.status, ["queued", "running", "unknown_external_state"]),
 				)))]
 				: []),
 		))

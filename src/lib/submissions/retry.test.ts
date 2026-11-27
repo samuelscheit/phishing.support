@@ -14,7 +14,9 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import type { WebsiteRoute } from "../website/types";
 import { MANUAL_RETRY_COOLDOWN_MS } from "./retry";
 import { listRetryHistory } from "./retry_history";
-import { retryWebsiteAnalysis, runDueWebsiteAutoRetries } from "./website";
+import { ensureWebsiteVisitJobs } from "../website/visit_queue/run";
+import { runQueuedVisits } from "../website/visit_queue/test_helpers";
+import { retryWebsiteAnalysis } from "./website";
 
 useTemporaryDatabase();
 
@@ -49,21 +51,41 @@ async function backdateRetries(submissionId: bigint, ms = MANUAL_RETRY_COOLDOWN_
 	}
 }
 
+/** A fake analysis that records the URLs the queued visits were given. */
 function startRecorder() {
 	const started: string[] = [];
-	return { started, startAnalysis: async (options: { url: string }) => { started.push(options.url); } };
+	return { started, visit: () => runQueuedVisits(async (options) => { started.push(options.url); }) };
+}
+
+/** A manual retry, and the visit it queued, run. */
+async function retryAndVisit(id: bigint) {
+	await retryWebsiteAnalysis(id);
+	await runQueuedVisits(async () => undefined);
+}
+
+/** The case's automatic retry, scheduled as its failure leaves it, and the visit it queued, run. */
+async function retryAutomatically(id: bigint, visit: () => Promise<unknown> = () => runQueuedVisits(async () => undefined)) {
+	const submission = await SubmissionsEntity.get(id);
+	const website = submission!.data.kind === "website" ? submission!.data.website : undefined;
+	const reason = submission!.info ?? "The browser service was unavailable.";
+	await SubmissionsEntity.update(id, { data: { kind: "website", website: { ...website!, autoRetry: { attempts: 1, reason, nextAttemptAt: new Date(Date.now() - 1000).toISOString() } } } });
+	expect(await ensureWebsiteVisitJobs()).toBe(1);
+	await visit();
 }
 
 describe("recording retries at the claim", () => {
 	test("a manual retry of a case judged not reportable records the status, info and finding it replaces", async () => {
 		const id = await websiteCase(1n, "invalid", { info: INFO, routes: [JUDGED_BENIGN] });
-		const { started, startAnalysis } = startRecorder();
+		const { started, visit } = startRecorder();
 		const before = Date.now();
 
-		await retryWebsiteAnalysis(id, { startAnalysis });
+		await retryWebsiteAnalysis(id);
 
+		// The retry claims the case and queues its visit; the visit starts the analysis.
+		expect((await SubmissionsEntity.get(id))?.status).toBe("queued");
+		expect(started).toEqual([]);
+		await visit();
 		expect(started).toEqual([URL]);
-		expect((await SubmissionsEntity.get(id))?.status).toBe("running");
 		const [retry, ...more] = await SubmissionRetriesEntity.listForSubmission(id);
 		expect(more).toEqual([]);
 		expect(retry).toMatchObject({ submissionId: id, fromStatus: "invalid", previousInfo: INFO, previousFinding: "benign", trigger: "manual" });
@@ -75,9 +97,9 @@ describe("recording retries at the claim", () => {
 		const reason = "The server restarted during the visit.";
 		const id = await websiteCase(2n, "failed", { info: reason });
 		await SubmissionsEntity.update(id, { data: { kind: "website", website: { url: URL, autoRetry: { attempts: 1, reason, nextAttemptAt: new Date(Date.now() - 1000).toISOString() } } } });
-		const { started, startAnalysis } = startRecorder();
+		const { started, visit } = startRecorder();
 
-		await expect(runDueWebsiteAutoRetries({ startAnalysis })).resolves.toBe(1);
+		await retryAutomatically(id, visit);
 
 		expect(started).toEqual([URL]);
 		expect(await SubmissionRetriesEntity.listForSubmission(id)).toEqual([expect.objectContaining({ fromStatus: "failed", previousInfo: reason, previousFinding: null, trigger: "automatic" })]);
@@ -95,16 +117,16 @@ describe("recording retries at the claim", () => {
 		const id = await websiteCase(3n, "invalid", { info: INFO, routes: [JUDGED_BENIGN, redirector] });
 		await SubmissionsEntity.update(id, { data: { kind: "website", website: { url: URL, routes: [JUDGED_BENIGN, redirector], analyzedRoute: 1 } } });
 
-		await retryWebsiteAnalysis(id, startRecorder());
+		await retryAndVisit(id);
 
 		expect(await SubmissionRetriesEntity.listForSubmission(id)).toEqual([expect.objectContaining({ previousFinding: "prank_or_troll" })]);
 	});
 
 	test("refused retries record nothing and leave the case as it was", async () => {
-		const { started, startAnalysis } = startRecorder();
+		const { started, visit } = startRecorder();
 		const refused = async (id: bigint, message: string) => {
 			const before = await SubmissionsEntity.get(id);
-			await expect(retryWebsiteAnalysis(id, { startAnalysis })).rejects.toThrow(message);
+			await expect(retryWebsiteAnalysis(id)).rejects.toThrow(message);
 			expect(await SubmissionRetriesEntity.listForSubmission(id)).toEqual([]);
 			expect((await SubmissionsEntity.get(id))?.status).toBe(before!.status);
 		};
@@ -132,18 +154,20 @@ describe("recording retries at the claim", () => {
 			return 15n;
 		})(), "Only website submissions can be retried.");
 
+		expect(await visit()).toEqual([]);
 		expect(started).toEqual([]);
 	});
 
-	test("two retries racing for one case start one analysis and record one retry", async () => {
+	test("retries racing for one case start one analysis and record one retry", async () => {
 		const id = await websiteCase(20n, "invalid", { info: INFO, routes: [JUDGED_BENIGN] });
-		const { started, startAnalysis } = startRecorder();
+		const { started, visit } = startRecorder();
 
 		const outcomes = await Promise.allSettled([
-			retryWebsiteAnalysis(id, { startAnalysis }),
-			retryWebsiteAnalysis(id, { startAnalysis }),
-			retryWebsiteAnalysis(id, { trigger: "automatic", startAnalysis }),
+			retryWebsiteAnalysis(id),
+			retryWebsiteAnalysis(id),
+			retryWebsiteAnalysis(id),
 		]);
+		await visit();
 
 		expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
 		// A loser finds the case claimed, or, when the winner's retry is already recorded, inside its cooldown.
@@ -156,25 +180,28 @@ describe("recording retries at the claim", () => {
 
 	test("anyone's retry waits out the cooldown after the last retry; the automatic retry does not", async () => {
 		const id = await websiteCase(24n, "invalid", { info: INFO, routes: [JUDGED_BENIGN] });
-		const { started, startAnalysis } = startRecorder();
-		await retryWebsiteAnalysis(id, { startAnalysis });
+		const { started, visit } = startRecorder();
+		await retryWebsiteAnalysis(id);
+		await visit();
 		await SubmissionsEntity.update(id, { status: "invalid" });
 
-		await expect(retryWebsiteAnalysis(id, { startAnalysis })).rejects.toThrow(/^This case was analyzed again moments ago; it can be analyzed again from \d{4}-\d\d-\d\d \d\d:\d\d UTC\.$/);
+		await expect(retryWebsiteAnalysis(id)).rejects.toThrow(/^This case was analyzed again moments ago; it can be analyzed again from \d{4}-\d\d-\d\d \d\d:\d\d UTC\.$/);
 		expect((await SubmissionsEntity.get(id))?.status).toBe("invalid");
 		expect(await SubmissionRetriesEntity.listForSubmission(id)).toHaveLength(1);
 		expect(started).toHaveLength(1);
 
 		// Just before the cooldown ends it still waits; once it ended, the retry starts.
 		await backdateRetries(id, MANUAL_RETRY_COOLDOWN_MS - 5_000);
-		await expect(retryWebsiteAnalysis(id, { startAnalysis })).rejects.toThrow("analyzed again moments ago");
+		await expect(retryWebsiteAnalysis(id)).rejects.toThrow("analyzed again moments ago");
 		await backdateRetries(id, 5_000);
-		await retryWebsiteAnalysis(id, { startAnalysis });
+		await retryWebsiteAnalysis(id);
+		await visit();
 		expect(started).toHaveLength(2);
 
 		// A browser-service failure is retried on its own backoff, however recent the last retry.
 		await SubmissionsEntity.update(id, { status: "failed", info: "Browser service unavailable." });
-		await retryWebsiteAnalysis(id, { trigger: "automatic", startAnalysis });
+		await retryAutomatically(id, visit);
+		expect(started).toHaveLength(3);
 		expect((await SubmissionRetriesEntity.listForSubmission(id)).map(({ trigger }) => trigger)).toEqual(["automatic", "manual", "manual"]);
 	});
 
@@ -182,18 +209,18 @@ describe("recording retries at the claim", () => {
 		const id = await websiteCase(21n, "invalid", { info: INFO });
 		// As if another request claimed it and its analysis failed between validation and claim.
 		await SubmissionsEntity.update(id, { status: "failed" });
-		await expect(SubmissionRetriesEntity.claim({ submissionId: id, from: "invalid", trigger: "manual" })).resolves.toBe(false);
+		await expect(SubmissionRetriesEntity.claim({ submissionId: id, from: "invalid", to: "running", trigger: "manual" })).resolves.toBe(false);
 		expect((await SubmissionsEntity.get(id))?.status).toBe("failed");
 		expect(await SubmissionRetriesEntity.listForSubmission(id)).toEqual([]);
 		// An unknown case is never claimed either.
-		await expect(SubmissionRetriesEntity.claim({ submissionId: 999n, from: "failed", trigger: "manual" })).resolves.toBe(false);
+		await expect(SubmissionRetriesEntity.claim({ submissionId: 999n, from: "failed", to: "running", trigger: "manual" })).resolves.toBe(false);
 	});
 
 	test("every retry of a case is kept, newest first, and its rows go with the case", async () => {
 		const id = await websiteCase(22n, "invalid", { info: INFO, routes: [JUDGED_BENIGN] });
-		await retryWebsiteAnalysis(id, startRecorder());
+		await retryAndVisit(id);
 		await SubmissionsEntity.update(id, { status: "failed", info: "Browser service unavailable." });
-		await retryWebsiteAnalysis(id, { trigger: "automatic", ...startRecorder() });
+		await retryAutomatically(id);
 
 		const retries = await SubmissionRetriesEntity.listForSubmission(id);
 		expect(retries.map(({ fromStatus, previousInfo, trigger }) => ({ fromStatus, previousInfo, trigger }))).toEqual([
@@ -219,10 +246,10 @@ describe("the public submission detail", () => {
 		const id = await websiteCase(30n, "invalid", { info: INFO, routes: [JUDGED_BENIGN] });
 		expect(JSON.parse((await detail(id)).text).retries).toEqual({ count: 0, lastAt: null });
 
-		await retryWebsiteAnalysis(id, startRecorder());
+		await retryAndVisit(id);
 		await SubmissionsEntity.update(id, { status: "invalid" });
 		await backdateRetries(id);
-		await retryWebsiteAnalysis(id, startRecorder());
+		await retryAndVisit(id);
 
 		const { status, text } = await detail(id);
 		expect(status).toBe(200);
@@ -247,7 +274,7 @@ describe("the operator's retried cases", () => {
 
 	test("is only given to the operator", async () => {
 		await websiteCase(40n, "invalid", { info: INFO });
-		await retryWebsiteAnalysis(40n, startRecorder());
+		await retryAndVisit(40n);
 
 		for (const response of [await list(), await list(basic("wrong-password-0123456789xyz")), await list("Bearer " + PASSWORD)]) {
 			expect(response.status).toBe(401);
@@ -263,13 +290,13 @@ describe("the operator's retried cases", () => {
 		// Case 50: judged benign, retried by hand, failed, retried automatically, now reported as malware.
 		const malware: WebsiteRoute = { ...JUDGED_BENIGN, siteAssessments: [{ hopIndex: 0, judgedHopIndex: 0, finding: "malware", evidenceQuote: "osascript -l JavaScript" }] };
 		await websiteCase(50n, "invalid", { info: INFO, routes: [JUDGED_BENIGN] });
-		await retryWebsiteAnalysis(50n, startRecorder());
+		await retryAndVisit(50n);
 		await SubmissionsEntity.update(50n, { status: "failed", info: "Browser service unavailable." });
-		await retryWebsiteAnalysis(50n, { trigger: "automatic", ...startRecorder() });
+		await retryAutomatically(50n);
 		await SubmissionsEntity.update(50n, { status: "reported", info: "Malware distribution confirmed at https://trylevo.app/.", data: { kind: "website", website: { url: URL, routes: [malware] } } });
 		// Case 51: an email judged not phishing, retried by hand and still running.
 		await SubmissionsEntity.create({ id: 51n, kind: "email", data: { kind: "email", email: { subject: "Your mailbox is full" } as never }, dedupeKey: "retry-51", status: "invalid", reporterIp: "203.0.113.77" });
-		await SubmissionRetriesEntity.claim({ submissionId: 51n, from: "invalid", trigger: "manual" });
+		await SubmissionRetriesEntity.claim({ submissionId: 51n, from: "invalid", to: "running", trigger: "manual" });
 		// A case never retried is not listed.
 		await websiteCase(52n, "invalid", { info: INFO });
 
@@ -303,7 +330,7 @@ describe("the operator's retried cases", () => {
 
 	test("an email without a subject is named by where it came from", async () => {
 		await SubmissionsEntity.create({ id: 60n, kind: "email", data: { kind: "email" }, dedupeKey: "retry-60", status: "failed", source: "imap:INBOX" });
-		await SubmissionRetriesEntity.claim({ submissionId: 60n, from: "failed", trigger: "manual" });
+		await SubmissionRetriesEntity.claim({ submissionId: 60n, from: "failed", to: "running", trigger: "manual" });
 		expect((await listRetryHistory()).map(({ target }) => target)).toEqual(["imap:INBOX"]);
 	});
 });

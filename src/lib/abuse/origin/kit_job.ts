@@ -1,14 +1,10 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { routeSiteAssessments } from "../../website/routes";
 import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
-import { analyzeWebsite } from "../../website/analysis/ai";
+import { fairKeyOfCaseId } from "../../website/visit_queue/queue";
 import { normalizePublicHttpUrl } from "../security/security";
 import { AbuseRepository } from "../repository";
 import { throwIfAborted } from "../worker/shared";
-
-export type KitSiblingAnalysisDependencies = {
-	analyzeWebsite?: typeof analyzeWebsite;
-};
 
 /** Submission sources created by kit discovery itself; they never seed another round. */
 const SIBLING_SOURCE = /^(?:kit|origin)-sibling:/;
@@ -57,15 +53,11 @@ export async function retiredKitHashes(hashes: readonly string[]): Promise<Set<s
 }
 
 /**
- * Run one normal analysis inside this job. Waiting for it keeps sibling
- * captures inside the worker lane's concurrency; a detached analysis let
- * dozens of browser captures start at once and exhaust the relay. A site
- * found only through kit files retired since it was queued is not opened.
+ * Open a case for a kit sibling; its visit waits in the visit queue under
+ * the share of the case whose kit found it. A site found only through kit
+ * files retired since it was queued is not opened.
  */
-export async function analyzeKitSibling(
-	params: { reportId: bigint; url: unknown; hashes?: unknown; signal?: AbortSignal },
-	dependencies: KitSiblingAnalysisDependencies = {},
-): Promise<bigint | undefined> {
+export async function analyzeKitSibling(params: { reportId: bigint; url: unknown; hashes?: unknown; signal?: AbortSignal }): Promise<bigint | undefined> {
 	const report = await AbuseRepository.getReport(params.reportId);
 	if (!report?.submissionId || typeof params.url !== "string") return undefined;
 	const url = normalizePublicHttpUrl(params.url);
@@ -79,14 +71,13 @@ export async function analyzeKitSibling(
 		}
 	}
 	throwIfAborted(params.signal);
-	let analysis: Promise<unknown> | undefined;
-	const submissionId = await createWebsiteSubmission({
+	const { id } = await createWebsiteSubmission({
 		url,
 		source: `kit-sibling:${report.submissionId.toString()}:${report.id.toString()}`,
 		reporterIp: report.requesterIp ?? undefined,
 		reporterCountry: report.requesterCountry ?? undefined,
 		reporterHeaders: report.requesterHeaders ?? undefined,
-	}, (options) => (analysis = (dependencies.analyzeWebsite ?? analyzeWebsite)(options)));
-	await analysis;
-	return submissionId;
+		fairKey: await fairKeyOfCaseId(report.submissionId),
+	});
+	return id;
 }

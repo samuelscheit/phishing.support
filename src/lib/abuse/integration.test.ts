@@ -10,7 +10,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "./contracts";
 import { sendAbuseEmailRoute } from "./mail/send";
 import { AbuseRepository, aggregateReportStatus } from "./repository";
-import { abuseArtifacts, abuseJobs, abuseMailMessages } from "./schema";
+import { abuseArtifacts, jobs, abuseMailMessages } from "./schema";
 import { sha256Hex } from "../util/hash";
 
 useTemporaryDatabase();
@@ -93,7 +93,7 @@ describe("abuse persistence boundary", () => {
 			"abuse_provider_runs",
 			"abuse_artifacts",
 			"abuse_mail_messages",
-			"abuse_jobs",
+			"jobs",
 			"abuse_events",
 			"abuse_locks",
 		];
@@ -101,7 +101,8 @@ describe("abuse persistence boundary", () => {
 		expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining(expectedTables));
 		for (const table of expectedTables) {
 			const foreignKeys = client.query(`PRAGMA foreign_key_list(${table})`).all() as Array<{ table: string; from: string }>;
-			const outside = foreignKeys.filter((foreignKey) => !foreignKey.table.startsWith("abuse_"));
+			// The worker's `jobs` table is the abuse system's own queue.
+			const outside = foreignKeys.filter((foreignKey) => !foreignKey.table.startsWith("abuse_") && foreignKey.table !== "jobs");
 			// A report is owned by a submission, or, as a criminal referral, by a campaign.
 			expect(outside.map((foreignKey) => `${foreignKey.from}->${foreignKey.table}`).sort(), table).toEqual(table === "abuse_reports" ? ["campaign_id->campaigns", "submission_id->submissions"] : []);
 		}
@@ -345,7 +346,7 @@ describe("abuse email lifecycle", () => {
 		expect(await AbuseRepository.getProviderRun(context.run.id)).toMatchObject({ executionStatus: "failed" });
 		expect(await AbuseRepository.getRoute(context.route.id)).toMatchObject({ status: "delivery_failed" });
 		const db = await getDb();
-		const retryJobs = db.select().from(abuseJobs).all().filter((job) => job.routeId === context.route.id && job.jobType === "send_email" && job.status === "queued");
+		const retryJobs = db.select().from(jobs).all().filter((job) => job.routeId === context.route.id && job.jobType === "send_email" && job.status === "queued");
 		expect(retryJobs).toHaveLength(1);
 		const outbound = await AbuseRepository.getOutboundMailForRun(context.run.id);
 		expect(outbound).toMatchObject({ status: "failed" });

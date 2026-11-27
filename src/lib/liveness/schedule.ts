@@ -1,5 +1,5 @@
 import { AbuseRepository } from "../abuse/repository";
-import type { AbuseJob } from "../abuse/schema";
+import type { Job } from "../abuse/schema";
 import { DAY_MS, HOUR_MS } from "../util/date_time";
 import { checkSite, type SiteCheckDependencies } from "./check";
 import { attributeCheck, observeHostMove, type HostMoveDependencies } from "./host_move";
@@ -41,7 +41,7 @@ export function nextLivenessCheckAt(reportedAt: Date, lastCheckedAt: Date | unde
  * running check passes itself as `successorOf`; `by` brings the check
  * forward to then, also after the schedule is done.
  */
-async function queueLivenessCheck(target: LivenessTarget, options: { successorOf?: bigint; now?: Date; by?: Date } = {}): Promise<AbuseJob | undefined> {
+async function queueLivenessCheck(target: LivenessTarget, options: { successorOf?: bigint; now?: Date; by?: Date } = {}): Promise<Job | undefined> {
 	const scheduled = nextLivenessCheckAt(target.reportedAt, target.lastCheckedAt, options.now ?? new Date());
 	const at = scheduled && options.by ? new Date(Math.min(scheduled.getTime(), options.by.getTime())) : scheduled ?? options.by;
 	if (!at) return undefined;

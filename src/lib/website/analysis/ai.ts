@@ -68,6 +68,11 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 	const sessions: WebsitePageSession[] = [];
 	// Automatic retries already spent on this case; the run's own data writes drop the record.
 	let priorAttempts = 0;
+	// Every step first checks that the visit's job still wants it: a stopped job ends the visit at its next step.
+	const step = (name: Parameters<typeof emitStep>[1], progress: number) => {
+		dependencies.signal?.throwIfAborted();
+		return emitStep(submissionId, name, progress);
+	};
 	const closeSessions = () => Promise.all(sessions.splice(0).map((session) => session.close().catch((error: unknown) => console.warn("Closing a capture browser failed:", error))));
 	// Every live capture of the case, the visit's included, presents the reporter's own browser.
 	const visitor = reporterBrowserIdentity(reporterHeaders);
@@ -96,7 +101,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 		// `new`, a restart during the first lookup would leave it looking queued
 		// forever with no retry path.
 		await SubmissionsEntity.update(submissionId, { status: "running", info: "Collecting bounded WHOIS, RDAP, and regional DNS evidence." });
-		await emitStep(submissionId, "whois_lookup", 5);
+		await step("whois_lookup", 5);
 		const whois = await (dependencies.getInfo ?? getInfo)(url);
 
 		await SubmissionsEntity.update(submissionId, {
@@ -105,7 +110,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			data: { kind: "website", website: { ...submitted, whois } },
 		});
 
-		await emitStep(submissionId, "archive_website", 10);
+		await step("archive_website", 10);
 		const captured = await capture({
 			url,
 			mhtmlSnapshot: options.mhtmlSnapshot,
@@ -131,12 +136,12 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				info: cloakingSuspectedInfo(archive.cloaking),
 				data: { kind: "website", website: { ...submitted, whois, archiveUrl: archive.url, routes: [{ hops: archive.navigationHops }], cloaking: archive.cloaking } },
 			});
-			await emitStep(submissionId, "failed", 100);
+			await step("failed", 100);
 			return submissionId;
 		}
 		const capturedHop = archive.attributionError ? undefined : capturedArchiveHop(archive);
 
-		await emitStep(submissionId, "save_artifacts", 40);
+		await step("save_artifacts", 40);
 		// A retry that reuses the stored capture keeps its original evidence package.
 		if (!reuseEvidenceArtifacts) {
 			await ArtifactsEntity.saveWebsiteArtifacts({ submissionId, archive, evidence: await websiteEvidence(submissionId, url, archive, dependencies, 0) });
@@ -146,7 +151,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				status: "invalid",
 				info: `${archive.attributionError} No report was created; resubmit the exact site whose page should be analyzed.`,
 			});
-			await emitStep(submissionId, "completed", 100);
+			await step("completed", 100);
 			return submissionId;
 		}
 		await SubmissionsEntity.update(submissionId, {
@@ -178,7 +183,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			routes: [walked[0]!.visited.chain],
 			first: firstBrowser,
 			capture: async (browser) => {
-				await emitStep(submissionId, "sample_rotation", 72);
+				await step("sample_rotation", 72);
 				return sampleCapture(browser)({ url });
 			},
 			walk: async (first, browser, route) => {
@@ -220,7 +225,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			: visited.cloakedDestination ? cloakedDestinationInfo(visited.cloakedDestination)
 			: inconclusive ?? unreportedVerdict(visited.classification, archive.url);
 
-		await emitStep(submissionId, "analysis_run", 75);
+		await step("analysis_run", 75);
 		await runStreamedAnalysisRun({
 			submissionId,
 			analysisKind: "analysis",
@@ -258,7 +263,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 
 		const reporter = { reporterIp, reporterCountry, reporterHeaders };
 		if (found) {
-			await emitStep(submissionId, "reporting", 90);
+			await step("reporting", 90);
 			const outcomes: string[] = [];
 			let filed = false;
 			for (const route of walked) {
@@ -269,7 +274,7 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 			// A case whose every finding was left out (each business of its funnel) is reported nowhere: it says so instead.
 			if (!filed) {
 				await SubmissionsEntity.update(submissionId, { status: "invalid", info: `${caseFinding}\n${outcomes.join("\n")}\nNo report was created.` });
-				await emitStep(submissionId, "completed", 100);
+				await step("completed", 100);
 				return submissionId;
 			}
 			await SubmissionsEntity.update(submissionId, { status: "reported", info: outcomes.join("\n") });
@@ -280,18 +285,21 @@ export async function analyzeWebsite(options: AnalyzeWebsiteOptions, dependencie
 				data: { unfinishedFlow: visited.inconclusive },
 				retry: { attempts: priorAttempts, reason: visited.inconclusive, exhausted: (visits: number) => `The visit stopped there ${visits} times; retry to visit the site again.` },
 			});
-			await emitStep(submissionId, "failed", 100);
+			await step("failed", 100);
 			return submissionId;
 		} else if (decoy) {
 			await SubmissionsEntity.update(submissionId, { status: "failed", info: caseFinding });
-			await emitStep(submissionId, "failed", 100);
+			await step("failed", 100);
 			return submissionId;
 		} else {
 			await SubmissionsEntity.update(submissionId, { status: "invalid", info: caseFinding });
 		}
 
-		await emitStep(submissionId, "completed", 100);
+		await step("completed", 100);
 	} catch (error) {
+		// A visit its job stopped (the worker shutting down, the job's deadline)
+		// is not the site's failure: the job's recovery decides what happens.
+		if (dependencies.signal?.aborted) throw error;
 		console.error("Website analysis failed:", error);
 		await recordWebsiteAnalysisFailure(submissionId, error, priorAttempts);
 		await emitStep(submissionId, "failed", 100);
@@ -403,19 +411,4 @@ async function reportAccessGate(chain: readonly WebsiteNavigationHop[], captured
 	if (!gate) return undefined;
 	const bareVisit = await checkBareVisit(capturedUrl, userAgent, dependencies);
 	return bareVisit ? { ...gate, bareVisit } : gate;
-}
-
-/**
- * A website visit the server's restart cut off: queued for the automatic
- * retry like a browser-service failure. The retry boundary still refuses a
- * case that reached reporting, so nothing is reported twice.
- */
-export async function retryInterruptedWebsiteAnalysis(submissionId: bigint): Promise<void> {
-	const submission = await SubmissionsEntity.get(submissionId);
-	if (submission?.data.kind !== "website") return;
-	const reason = "The server restarted during the visit.";
-	await failWebsiteAnalysis(submissionId, {
-		info: reason,
-		retry: { attempts: submission.data.website.autoRetry?.attempts ?? 0, reason, exhausted: (visits) => `It was cut off ${visits} times; retry to visit the site again.` },
-	});
 }

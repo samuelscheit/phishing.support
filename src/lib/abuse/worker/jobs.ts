@@ -1,6 +1,6 @@
 import { AbuseRepository } from "../repository";
 import type { resolveAbuseTarget } from "../resolver";
-import type { AbuseJob, AbuseJobType, AbuseReport } from "../schema";
+import type { Job, JobType, AbuseReport } from "../schema";
 import { executeProviderSubmission, getProviderSubmissionProvider } from "../providers";
 import type { JobClaimFilter } from "../persistence/jobs";
 import { readSendEmailPayload, sendEmail } from "./email";
@@ -24,6 +24,7 @@ import { linkSiteToCampaign } from "../../campaign/sweep";
 import { runLivenessCheck } from "../../liveness/schedule";
 import { reportHostMove } from "../host_move/report";
 import { runEscalation } from "../escalation/run";
+import { runWebsiteVisit } from "../../website/visit_queue/run";
 
 /**
  * Jobs are claimed by lane, so one kind of slow work never starves another:
@@ -43,8 +44,10 @@ import { runEscalation } from "../escalation/run";
  *   each site it turns up, minutes each; a search queues up to a hundred.
  * - `liveness`: site checks run on their schedule after each report, hundreds
  *   a day, each on time instead of behind provider and browser work.
+ * - `visit`: every website analysis, `WEBSITE_VISIT_CONCURRENCY` at once,
+ *   shared fairly between reporters (`laneFilter`).
  */
-export const JOB_LANES = ["control", "external", "sweep", "link", "discovery", "liveness"] as const;
+export const JOB_LANES = ["control", "external", "sweep", "link", "discovery", "liveness", "visit"] as const;
 export type JobLane = (typeof JOB_LANES)[number];
 
 export type JobPolicy = {
@@ -57,7 +60,7 @@ export type JobPolicy = {
 
 const MINUTE = 60_000;
 
-export const JOB_POLICY: Readonly<Record<AbuseJobType, JobPolicy>> = {
+export const JOB_POLICY: Readonly<Record<JobType, JobPolicy>> = {
 	resolve_report: { lane: "control", supplementary: false },
 	monitor_provider_reply: { lane: "control", supplementary: false },
 	classify_provider_reply: { lane: "control", supplementary: false },
@@ -86,20 +89,27 @@ export const JOB_POLICY: Readonly<Record<AbuseJobType, JobPolicy>> = {
 	analyze_kit_sibling: { lane: "discovery", supplementary: true },
 	// One site check: DNS, RDAP, and a visit of up to nine requests of 15 seconds each.
 	check_site_liveness: { lane: "liveness", supplementary: true },
+	// A whole website analysis: walks, cloaking routes, rotation sampling and the models. Its own budgets end it well before.
+	visit_website: { lane: "visit", supplementary: true, minTimeoutMs: 3 * 60 * MINUTE },
 };
 
-/** The claim filter of a lane: exactly the job types the policy puts in it. */
-export function laneFilter(lane: JobLane): JobClaimFilter {
-	return { jobTypes: (Object.keys(JOB_POLICY) as AbuseJobType[]).filter((type) => JOB_POLICY[type].lane === lane) };
+/**
+ * The claim filter of a lane: exactly the job types the policy puts in it.
+ * The `visit` lane is shared between reporters: one never holds more than
+ * all slots but one, so another reporter's visit always finds a slot free.
+ */
+export function laneFilter(lane: JobLane, slots = 1): JobClaimFilter {
+	const jobTypes = (Object.keys(JOB_POLICY) as JobType[]).filter((type) => JOB_POLICY[type].lane === lane);
+	return lane === "visit" ? { jobTypes, fairShare: { perKeyLimit: Math.max(1, slots - 1) } } : { jobTypes };
 }
 
 /** Jobs that may cross an external provider side-effect boundary. */
-export const isExternalJob = (job: AbuseJob): boolean => JOB_POLICY[job.jobType].lane === "external";
+export const isExternalJob = (job: Job): boolean => JOB_POLICY[job.jobType].lane === "external";
 
 export type LaneTimeouts = { control: number; external: number; sweep: number; liveness: number };
 
 /** The execution deadline of a job: its lane's, but never below its own minimum. */
-export function jobTimeoutMs(jobType: AbuseJobType, lanes: LaneTimeouts): number {
+export function jobTimeoutMs(jobType: JobType, lanes: LaneTimeouts): number {
 	const { lane, minTimeoutMs = 0 } = JOB_POLICY[jobType];
 	const laneTimeout = lane === "control" ? lanes.control : lane === "sweep" ? lanes.sweep : lane === "liveness" ? lanes.liveness : lanes.external;
 	return Math.max(laneTimeout, minTimeoutMs);
@@ -122,9 +132,9 @@ function reporterOf(report: AbuseReport) {
 	};
 }
 
-type JobHandler = (job: AbuseJob, context: JobContext) => Promise<unknown>;
+type JobHandler = (job: Job, context: JobContext) => Promise<unknown>;
 
-async function runInvestigationJob(job: AbuseJob, { signal, investigateReport }: JobContext): Promise<void> {
+async function runInvestigationJob(job: Job, { signal, investigateReport }: JobContext): Promise<void> {
 	const reportId = idFrom(job.reportId, "reportId");
 	const report = await AbuseRepository.getReport(reportId);
 	if (!report?.submissionId) return;
@@ -140,7 +150,7 @@ async function runInvestigationJob(job: AbuseJob, { signal, investigateReport }:
 }
 
 /** A joining case's own evidence, reported against the report it joined; a failed attempt is retried. */
-async function runJoinedCaseJob(job: AbuseJob, { signal, investigateJoinedCase }: JobContext): Promise<void> {
+async function runJoinedCaseJob(job: Job, { signal, investigateJoinedCase }: JobContext): Promise<void> {
 	const reportId = idFrom(job.reportId, "reportId");
 	const report = await AbuseRepository.getReport(reportId);
 	if (!report) return;
@@ -153,7 +163,7 @@ async function runJoinedCaseJob(job: AbuseJob, { signal, investigateJoinedCase }
 	}
 }
 
-async function runPortal(job: AbuseJob, { services }: JobContext): Promise<void> {
+async function runPortal(job: Job, { services }: JobContext): Promise<void> {
 	const routeId = idFrom(job.routeId, "routeId");
 	const route = await AbuseRepository.getRoute(routeId);
 	if (!route) throw new Error("Abuse route no longer exists.");
@@ -165,7 +175,7 @@ async function runPortal(job: AbuseJob, { services }: JobContext): Promise<void>
 }
 
 /** Dispatch a direct submission exclusively through the provider registry. */
-async function submitProvider(job: AbuseJob, { signal }: JobContext): Promise<void> {
+async function submitProvider(job: Job, { signal }: JobContext): Promise<void> {
 	const route = await AbuseRepository.getRoute(idFrom(job.routeId, "routeId"));
 	if (!route || route.routeType !== "provider_submission") return;
 	const provider = getProviderSubmissionProvider(route.providerRegistryKey);
@@ -181,7 +191,7 @@ async function submitProvider(job: AbuseJob, { signal }: JobContext): Promise<vo
 	await executeProviderSubmission({ routeId: route.id, provider, signal });
 }
 
-export const JOB_HANDLERS: Readonly<Record<AbuseJobType, JobHandler>> = {
+export const JOB_HANDLERS: Readonly<Record<JobType, JobHandler>> = {
 	resolve_report: (job, { resolveTarget }) => resolveReport(idFrom(job.reportId, "reportId"), resolveTarget, job.retryCount),
 	send_email: (job, { services }) => sendEmail(idFrom(job.routeId, "routeId"), services, readSendEmailPayload(job.payload)),
 	run_portal: runPortal,
@@ -202,4 +212,5 @@ export const JOB_HANDLERS: Readonly<Record<AbuseJobType, JobHandler>> = {
 	check_site_liveness: (job, { signal }) => runLivenessCheck({ jobId: job.id, targetId: parseJobBigInt(job.payload?.targetId, "payload.targetId"), dependencies: signal ? { signal } : {} }),
 	report_host_move: (job) => reportHostMove({ reportId: idFrom(job.reportId, "reportId"), key: String(job.payload?.key ?? "") }),
 	escalate_target: (job, { signal }) => runEscalation({ targetId: parseJobBigInt(job.payload?.targetId, "payload.targetId"), jobId: job.id, ...(signal ? { signal } : {}) }),
+	visit_website: (job, { signal }) => runWebsiteVisit(job, signal ? { signal } : {}),
 };

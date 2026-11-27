@@ -75,26 +75,29 @@ export class SubmissionsEntity {
         return row!.id;
     }
 
-    static async failAllRunning(params?: { info?: string }) {
+    /**
+     * Fail the email analyses a restart cut off, with their runs. Website
+     * cases are not touched: their visit jobs resume them (website/visit_queue).
+     */
+    static async failRunningEmails(params?: { info?: string }) {
         const db = await getDb();
         const info = params?.info ?? "Marked as failed (previous run did not complete).";
-        const now = new Date();
         const rows = await db
             .update(submissions)
-            .set({ status: "failed", info, updatedAt: now })
-            .where(eq(submissions.status, "running"))
+            .set({ status: "failed", info, updatedAt: new Date() })
+            .where(and(eq(submissions.kind, "email"), eq(submissions.status, "running")))
             .returning({ id: submissions.id });
+        for (const { id } of rows) await SubmissionsEntity.failRunningAnalysisRuns(id, info);
+        return rows;
+    }
+
+    /** Fail a case's analysis runs that are still marked running: their process is gone. */
+    static async failRunningAnalysisRuns(submissionId: bigint, info: string) {
+        const db = await getDb();
         await db
             .update(analysisRuns)
-            .set({
-                status: "failed",
-                data: {
-                    lastError: info,
-                    failedAt: now.toISOString(),
-                },
-            })
-            .where(eq(analysisRuns.status, "running"));
-        return rows;
+            .set({ status: "failed", data: { lastError: info, failedAt: new Date().toISOString() } })
+            .where(and(eq(analysisRuns.submissionId, submissionId), eq(analysisRuns.status, "running")));
     }
 
     static async update(id: bigint, values: Partial<typeof submissions.$inferInsert>) {
@@ -166,19 +169,21 @@ export class SubmissionsEntity {
         return row;
     }
 
-	/** Failed website analyses whose automatic retry is due. */
-	static async listDueWebsiteAutoRetries(now: Date, limit = 10) {
+	/** Website cases that wait for a visit: queued or running, or failed with an automatic retry scheduled. */
+	static async listAwaitingWebsiteVisits() {
 		const db = await getDb();
 		return db
-			.select({ id: submissions.id })
+			.select()
 			.from(submissions)
 			.where(and(
 				eq(submissions.kind, "website"),
-				eq(submissions.status, "failed"),
-				sql`json_extract(${submissions.data}, '$.website.autoRetry.nextAttemptAt') <= ${now.toISOString()}`,
+				or(
+					inArray(submissions.status, ["queued", "running"]),
+					and(eq(submissions.status, "failed"), sql`json_extract(${submissions.data}, '$.website.autoRetry.nextAttemptAt') is not null`),
+				),
 			))
 			.orderBy(submissions.createdAt)
-			.limit(limit);
+			.all();
 	}
 
 	/**

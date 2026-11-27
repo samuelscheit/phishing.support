@@ -2,6 +2,7 @@ import { isBrowserUnavailable } from "../../browser/fabric";
 import { DAY_MS, MINUTE_MS } from "../../util/date_time";
 import type { JobGiveUp } from "../persistence/provider_runs";
 import { ProviderSubmissionRetryLaterError } from "../providers/submission_contracts";
+import { WebsiteVisitPendingError } from "../../website/visit_queue/queue";
 
 
 export const MAX_RETRIES = 8;
@@ -33,6 +34,13 @@ export function jobWaitOf(error: unknown, waitedMs: number): JobWait | undefined
 			// A missing browser is never the route's failure: a person decides once the wait is over.
 			giveUp: { routeStatus: "needs_human", reason: "browser_unavailable" },
 			describe: (hours) => `No browser for ${hours} h; a person must decide.`,
+		};
+	}
+	if (error instanceof WebsiteVisitPendingError) {
+		return {
+			afterMs: Math.max(error.retryAfterMs, Math.min(15 * 60_000, Math.round(waitedMs / 4))),
+			giveUp: { routeStatus: "needs_human", reason: "visit_pending" },
+			describe: (hours) => `The website visit it needs was still not done after ${hours} h.`,
 		};
 	}
 	if (error instanceof ProviderSubmissionRetryLaterError) {

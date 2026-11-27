@@ -1,30 +1,54 @@
-import { and, asc, eq, gt, inArray, like, lte, ne, notLike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, lte, ne, notLike, or, sql, type SQL } from "drizzle-orm";
 
 import { getDb, type DbExecutor } from "../../db";
 import { generateId } from "../../db/ids";
 import {
-	abuseJobs,
-	type AbuseJob,
-	type AbuseJobStatus,
-	type AbuseJobType,
+	jobs,
+	type Job,
+	type JobStatus,
+	type JobType,
 } from "../schema";
 import { now, recordEvent } from "./shared";
 
-type NewJob = {
-	jobType: AbuseJobType;
-	reportId: bigint;
+export type NewJob = {
+	jobType: JobType;
+	/** The report the job works for; a website visit belongs to a case, not a report. */
+	reportId?: bigint;
 	routeId?: bigint;
 	runId?: bigint;
 	payload?: Record<string, unknown>;
 	dedupeKey?: string;
+	/** The share it counts against in a fair-share lane. */
+	fairKey?: string;
+	/** At most one job per key runs at once; a route's jobs default to `route:<id>`. */
+	serialKey?: string;
 	nextAttemptAt?: Date;
 };
 
+/** The serial key of a job: its own, else its provider route's, so a route never runs two jobs at once. */
+function serialKeyOf(params: Pick<NewJob, "serialKey" | "routeId">): string | undefined {
+	return params.serialKey ?? (params.routeId === undefined ? undefined : `route:${params.routeId.toString()}`);
+}
+
+/**
+ * A job's lifecycle event on its report's audit trail. A job without a report
+ * (a website visit) has no trail there: its case records its runs and retries.
+ */
+function recordJobEvent(
+	tx: DbExecutor,
+	job: { id: bigint; reportId?: bigint | null; routeId?: bigint | null; runId?: bigint | null },
+	eventType: string,
+	data?: Record<string, unknown>,
+): void {
+	if (job.reportId === undefined || job.reportId === null) return;
+	recordEvent(tx, { reportId: job.reportId, routeId: job.routeId ?? undefined, runId: job.runId ?? undefined, jobId: job.id, eventType, ...(data ? { data } : {}) });
+}
+
 /** Insert a queued job and its `job.queued` event inside the caller's transaction. */
-export function insertQueuedJob(tx: DbExecutor, params: NewJob, eventData: Record<string, unknown> = {}): AbuseJob {
+export function insertQueuedJob(tx: DbExecutor, params: NewJob, eventData: Record<string, unknown> = {}): Job {
 	const id = generateId();
 	const timestamp = now();
-	tx.insert(abuseJobs)
+	tx.insert(jobs)
 		.values({
 			id,
 			jobType: params.jobType,
@@ -33,6 +57,8 @@ export function insertQueuedJob(tx: DbExecutor, params: NewJob, eventData: Recor
 			runId: params.runId,
 			payload: params.payload ?? {},
 			dedupeKey: params.dedupeKey,
+			fairKey: params.fairKey,
+			serialKey: serialKeyOf(params),
 			status: "queued",
 			retryCount: 0,
 			nextAttemptAt: params.nextAttemptAt ?? timestamp,
@@ -41,8 +67,23 @@ export function insertQueuedJob(tx: DbExecutor, params: NewJob, eventData: Recor
 			updatedAt: timestamp,
 		})
 		.run();
-	recordEvent(tx, { reportId: params.reportId, routeId: params.routeId, runId: params.runId, jobId: id, eventType: "job.queued", data: { jobType: params.jobType, ...eventData } });
-	return tx.select().from(abuseJobs).where(eq(abuseJobs.id, id)).get()!;
+	recordJobEvent(tx, { id, ...params }, "job.queued", { jobType: params.jobType, ...eventData });
+	return tx.select().from(jobs).where(eq(jobs.id, id)).get()!;
+}
+
+/** The job under a dedupe key that is still queued or running (or awaits reconciliation). */
+export function activeJobByDedupeKey(tx: DbExecutor, dedupeKey: string, except?: bigint): Job | undefined {
+	return tx
+		.select()
+		.from(jobs)
+		.where(
+			and(
+				eq(jobs.dedupeKey, dedupeKey),
+				inArray(jobs.status, ["queued", "running", "unknown_external_state"]),
+				...(except === undefined ? [] : [ne(jobs.id, except)]),
+			),
+		)
+		.get();
 }
 
 export async function enqueueJob(params: NewJob & {
@@ -50,33 +91,62 @@ export async function enqueueJob(params: NewJob & {
 	successorOf?: bigint;
 	/** A queued duplicate due later than `nextAttemptAt` is brought forward to it, instead of left as it is. */
 	advance?: boolean;
-}): Promise<AbuseJob> {
+}): Promise<Job> {
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
-			if (params.dedupeKey) {
-				const existing = tx
-					.select()
-					.from(abuseJobs)
-					.where(
-						and(
-							eq(abuseJobs.dedupeKey, params.dedupeKey),
-							inArray(abuseJobs.status, ["queued", "running", "unknown_external_state"]),
-							...(params.successorOf === undefined ? [] : [ne(abuseJobs.id, params.successorOf)]),
-						),
-					)
-					.get();
-				if (existing && params.advance && params.nextAttemptAt && existing.status === "queued" && existing.nextAttemptAt > params.nextAttemptAt) {
-					tx.update(abuseJobs).set({ nextAttemptAt: params.nextAttemptAt, updatedAt: now() }).where(eq(abuseJobs.id, existing.id)).run();
-					return { ...existing, nextAttemptAt: params.nextAttemptAt };
+			const { successorOf, advance, ...job } = params;
+			if (job.dedupeKey) {
+				const existing = activeJobByDedupeKey(tx, job.dedupeKey, successorOf);
+				if (existing && advance && job.nextAttemptAt && existing.status === "queued" && existing.nextAttemptAt > job.nextAttemptAt) {
+					tx.update(jobs).set({ nextAttemptAt: job.nextAttemptAt, updatedAt: now() }).where(eq(jobs.id, existing.id)).run();
+					return { ...existing, nextAttemptAt: job.nextAttemptAt };
 				}
 				if (existing) return existing;
 			}
-			const { successorOf: _successorOf, advance: _advance, ...job } = params;
 			return insertQueuedJob(tx, job);
 		},
 		{ behavior: "immediate" }
 	);
+}
+
+/**
+ * Queue a job under its dedupe key, replacing the one still waiting there
+ * (its payload, keys and due time become these): the newest request for the
+ * same work wins. A running job under the key is no duplicate; it may be the
+ * one that queues its successor.
+ */
+export async function replaceQueuedJob(params: NewJob & { dedupeKey: string }): Promise<Job> {
+	const db = await getDb();
+	return db.transaction(
+		(tx) => {
+			const waiting = tx.select().from(jobs).where(and(eq(jobs.dedupeKey, params.dedupeKey), eq(jobs.status, "queued"))).get();
+			if (!waiting) return insertQueuedJob(tx, params);
+			const changes = {
+				payload: params.payload ?? {},
+				fairKey: params.fairKey ?? null,
+				serialKey: serialKeyOf(params) ?? null,
+				nextAttemptAt: params.nextAttemptAt ?? now(),
+				retryCount: 0,
+				updatedAt: now(),
+			};
+			tx.update(jobs).set(changes).where(eq(jobs.id, waiting.id)).run();
+			return { ...waiting, ...changes };
+		},
+		{ behavior: "immediate" },
+	);
+}
+
+/** The newest job ever queued under a dedupe key, in any state. */
+export async function latestJobByDedupeKey(dedupeKey: string): Promise<Job | undefined> {
+	const db = await getDb();
+	return db.select().from(jobs).where(eq(jobs.dedupeKey, dedupeKey)).orderBy(desc(jobs.createdAt), desc(jobs.id)).limit(1).get();
+}
+
+/** Delete the job still waiting under a dedupe key: work that is no longer wanted. */
+export async function discardQueuedJob(dedupeKey: string): Promise<boolean> {
+	const db = await getDb();
+	return db.delete(jobs).where(and(eq(jobs.dedupeKey, dedupeKey), eq(jobs.status, "queued"))).returning({ id: jobs.id }).all().length > 0;
 }
 
 /**
@@ -86,18 +156,18 @@ export async function enqueueJob(params: NewJob & {
  */
 export async function discardQueuedJobs(prefix: string, keep: string): Promise<number> {
 	const db = await getDb();
-	return db.delete(abuseJobs)
-		.where(and(eq(abuseJobs.status, "queued"), like(abuseJobs.dedupeKey, `${prefix}%`), notLike(abuseJobs.dedupeKey, `${keep}%`)))
-		.returning({ id: abuseJobs.id })
+	return db.delete(jobs)
+		.where(and(eq(jobs.status, "queued"), like(jobs.dedupeKey, `${prefix}%`), notLike(jobs.dedupeKey, `${keep}%`)))
+		.returning({ id: jobs.id })
 		.all().length;
 }
 
 /** The address of every kit-sibling analysis a kit file's search queued, in any state. */
 export async function listKitSiblingAnalysisUrls(sha256: string): Promise<string[]> {
 	const db = await getDb();
-	return db.select({ url: sql<string>`json_extract(${abuseJobs.payload}, '$.url')` })
-		.from(abuseJobs)
-		.where(and(eq(abuseJobs.jobType, "analyze_kit_sibling"), sql`exists (select 1 from json_each(${abuseJobs.payload}, '$.hashes') where value = ${sha256})`))
+	return db.select({ url: sql<string>`json_extract(${jobs.payload}, '$.url')` })
+		.from(jobs)
+		.where(and(eq(jobs.jobType, "analyze_kit_sibling"), sql`exists (select 1 from json_each(${jobs.payload}, '$.hashes') where value = ${sha256})`))
 		.all()
 		.map(({ url }) => url);
 }
@@ -105,17 +175,17 @@ export async function listKitSiblingAnalysisUrls(sha256: string): Promise<string
 /** Whether any job, in any state, was ever queued under this dedupe key. */
 export async function hasJob(dedupeKey: string): Promise<boolean> {
 	const db = await getDb();
-	return Boolean(db.select({ id: abuseJobs.id }).from(abuseJobs).where(eq(abuseJobs.dedupeKey, dedupeKey)).get());
+	return Boolean(db.select({ id: jobs.id }).from(jobs).where(eq(jobs.dedupeKey, dedupeKey)).get());
 }
 
 /** The report's jobs still waiting to run, soonest first: what the case page says happens next. */
-export async function listQueuedJobsForReport(reportId: bigint): Promise<Array<Pick<AbuseJob, "jobType" | "routeId" | "nextAttemptAt">>> {
+export async function listQueuedJobsForReport(reportId: bigint): Promise<Array<Pick<Job, "jobType" | "routeId" | "nextAttemptAt">>> {
 	const db = await getDb();
 	return db
-		.select({ jobType: abuseJobs.jobType, routeId: abuseJobs.routeId, nextAttemptAt: abuseJobs.nextAttemptAt })
-		.from(abuseJobs)
-		.where(and(eq(abuseJobs.reportId, reportId), eq(abuseJobs.status, "queued")))
-		.orderBy(asc(abuseJobs.nextAttemptAt))
+		.select({ jobType: jobs.jobType, routeId: jobs.routeId, nextAttemptAt: jobs.nextAttemptAt })
+		.from(jobs)
+		.where(and(eq(jobs.reportId, reportId), eq(jobs.status, "queued")))
+		.orderBy(asc(jobs.nextAttemptAt))
 		.all();
 }
 
@@ -124,76 +194,75 @@ export async function listQueuedJobsForReport(reportId: bigint): Promise<Array<P
  * executions. This is for immutable source events such as a provider message;
  * recurring jobs must continue to use `enqueueJob`'s active-only dedupe.
  */
-export async function enqueueJobOnce(params: NewJob & { dedupeKey: string }): Promise<AbuseJob> {
+export async function enqueueJobOnce(params: NewJob & { dedupeKey: string }): Promise<Job> {
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
-			const existing = tx.select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, params.dedupeKey)).get();
+			const existing = tx.select().from(jobs).where(eq(jobs.dedupeKey, params.dedupeKey)).get();
 			return existing ?? insertQueuedJob(tx, params, { lifetimeDedupe: true });
 		},
 		{ behavior: "immediate" },
 	);
 }
 
-/** Atomically leases one due job, never allowing two active jobs for a route. */
-
 export type JobClaimFilter = {
 	/** Restrict a lane to a concrete set of job types. */
-	readonly jobTypes?: readonly AbuseJobType[];
+	readonly jobTypes?: readonly JobType[];
+	/**
+	 * Share the lane between fair keys: a key never holds more than
+	 * `perKeyLimit` running jobs, and of the due jobs the one whose key runs
+	 * the fewest goes first, oldest first among equals. One reporter's flood
+	 * then waits behind everyone else's next job instead of in front of it.
+	 */
+	readonly fairShare?: { readonly perKeyLimit: number };
 };
 
-export async function claimNextJob(owner: string, leaseMs: number, filter: JobClaimFilter = {}): Promise<AbuseJob | undefined> {
+/** Running with a live lease: a job that holds its serial key and counts against its fair key. */
+function liveRunning(alias: string, at: number): SQL {
+	return sql.raw(`${alias}.status = 'running' and ${alias}.lease_expires_at > ${at}`);
+}
+
+/**
+ * Atomically lease one due job. A job whose serial key another job holds
+ * (one per provider route, one visit per site group) waits; in a fair-share
+ * lane, keys take turns (`JobClaimFilter.fairShare`).
+ */
+export async function claimNextJob(owner: string, leaseMs: number, filter: JobClaimFilter = {}): Promise<Job | undefined> {
 	const db = await getDb();
 	const timestamp = now();
-	const leaseExpiresAt = new Date(timestamp.getTime() + leaseMs);
+	const at = timestamp.getTime();
+	const leaseExpiresAt = new Date(at + leaseMs);
+	const types = filter.jobTypes?.length ? [...filter.jobTypes] : undefined;
+	const peerTypes = types ? sql` and peer.job_type in (${sql.join(types.map((type) => sql`${type}`), sql`, `)})` : sql``;
+	const serialFree = sql`("jobs"."serial_key" is null or not exists (select 1 from jobs as busy where busy.serial_key = "jobs"."serial_key" and busy.id <> "jobs"."id" and ${liveRunning("busy", at)}))`;
+	const keyLoad = sql<number>`(select count(*) from jobs as peer where peer.fair_key = "jobs"."fair_key" and peer.id <> "jobs"."id" and ${liveRunning("peer", at)}${peerTypes})`;
+	const fairShare = filter.fairShare;
 	return db.transaction(
 		(tx) => {
-			const typeFilter = filter.jobTypes?.length ? inArray(abuseJobs.jobType, [...filter.jobTypes]) : undefined;
-			const candidates = tx
+			const candidate = tx
 				.select()
-				.from(abuseJobs)
+				.from(jobs)
 				.where(
-						and(
-							or(
-								and(eq(abuseJobs.status, "queued"), lte(abuseJobs.nextAttemptAt, timestamp)),
-								and(eq(abuseJobs.status, "running"), lte(abuseJobs.leaseExpiresAt, timestamp), eq(abuseJobs.unknownExternalState, false)),
-							),
-							typeFilter,
+					and(
+						or(
+							and(eq(jobs.status, "queued"), lte(jobs.nextAttemptAt, timestamp)),
+							and(eq(jobs.status, "running"), lte(jobs.leaseExpiresAt, timestamp), eq(jobs.unknownExternalState, false)),
 						),
+						types ? inArray(jobs.jobType, types) : undefined,
+						serialFree,
+						fairShare ? sql`${keyLoad} < ${fairShare.perKeyLimit}` : undefined,
+					),
 				)
-				.orderBy(asc(abuseJobs.nextAttemptAt), asc(abuseJobs.createdAt))
-				.limit(32)
-				.all();
-			for (const candidate of candidates) {
-				if (candidate.routeId) {
-					const active = tx
-						.select({ id: abuseJobs.id })
-						.from(abuseJobs)
-						.where(
-							and(
-								eq(abuseJobs.routeId, candidate.routeId),
-								eq(abuseJobs.status, "running"),
-								gt(abuseJobs.leaseExpiresAt, timestamp),
-							),
-						)
-						.get();
-					if (active) continue;
-				}
-				tx.update(abuseJobs)
-					.set({ status: "running", leaseOwner: owner, leaseExpiresAt, updatedAt: timestamp })
-					.where(eq(abuseJobs.id, candidate.id))
-					.run();
-				recordEvent(tx, {
-					reportId: candidate.reportId!,
-					routeId: candidate.routeId ?? undefined,
-					runId: candidate.runId ?? undefined,
-					jobId: candidate.id,
-					eventType: "job.claimed",
-					data: { owner },
-				});
-				return tx.select().from(abuseJobs).where(eq(abuseJobs.id, candidate.id)).get();
-			}
-			return undefined;
+				.orderBy(...(fairShare ? [asc(keyLoad)] : []), asc(jobs.nextAttemptAt), asc(jobs.createdAt))
+				.limit(1)
+				.get();
+			if (!candidate) return undefined;
+			tx.update(jobs)
+				.set({ status: "running", leaseOwner: owner, leaseExpiresAt, updatedAt: timestamp })
+				.where(eq(jobs.id, candidate.id))
+				.run();
+			recordJobEvent(tx, candidate, "job.claimed", { owner });
+			return tx.select().from(jobs).where(eq(jobs.id, candidate.id)).get();
 		},
 		{ behavior: "immediate" }
 	);
@@ -203,11 +272,11 @@ export async function renewJobLease(jobId: bigint, owner: string, leaseMs: numbe
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
-			const job = tx.select({ status: abuseJobs.status, leaseOwner: abuseJobs.leaseOwner }).from(abuseJobs).where(eq(abuseJobs.id, jobId)).get();
+			const job = tx.select({ status: jobs.status, leaseOwner: jobs.leaseOwner }).from(jobs).where(eq(jobs.id, jobId)).get();
 			if (!job || job.status !== "running" || job.leaseOwner !== owner) return false;
-			tx.update(abuseJobs)
+			tx.update(jobs)
 				.set({ leaseExpiresAt: new Date(Date.now() + leaseMs), updatedAt: now() })
-				.where(eq(abuseJobs.id, jobId))
+				.where(eq(jobs.id, jobId))
 				.run();
 			return true;
 		},
@@ -215,20 +284,30 @@ export async function renewJobLease(jobId: bigint, owner: string, leaseMs: numbe
 	);
 }
 
-export async function completeJob(jobId: bigint, owner: string): Promise<void> {
-	const db = await getDb();
-	db.transaction(
+/**
+ * Settle the job `owner` holds: set what `changes` says and record `eventType`.
+ * A job another worker took over in the meantime is left alone.
+ */
+function settleOwnedJob(
+	jobId: bigint,
+	owner: string,
+	changes: (job: Job) => Partial<typeof jobs.$inferInsert>,
+	event: (job: Job) => { eventType: string; data?: Record<string, unknown> },
+): Promise<void> {
+	return getDb().then((db) => db.transaction(
 		(tx) => {
-			const job = tx.select().from(abuseJobs).where(eq(abuseJobs.id, jobId)).get();
+			const job = tx.select().from(jobs).where(eq(jobs.id, jobId)).get();
 			if (!job || job.leaseOwner !== owner) return;
-			tx.update(abuseJobs)
-				.set({ status: "completed", leaseOwner: null, leaseExpiresAt: null, unknownExternalState: false, updatedAt: now() })
-				.where(eq(abuseJobs.id, jobId))
-				.run();
-			recordEvent(tx, { reportId: job.reportId!, routeId: job.routeId ?? undefined, runId: job.runId ?? undefined, jobId, eventType: "job.completed" });
+			tx.update(jobs).set({ leaseOwner: null, leaseExpiresAt: null, ...changes(job), updatedAt: now() }).where(eq(jobs.id, jobId)).run();
+			const { eventType, data } = event(job);
+			recordJobEvent(tx, job, eventType, data);
 		},
-		{ behavior: "immediate" }
-	);
+		{ behavior: "immediate" },
+	));
+}
+
+export async function completeJob(jobId: bigint, owner: string): Promise<void> {
+	await settleOwnedJob(jobId, owner, () => ({ status: "completed", unknownExternalState: false }), () => ({ eventType: "job.completed" }));
 }
 
 type RequeueParams = { jobId: bigint; owner: string; error: string; afterMs: number };
@@ -247,94 +326,30 @@ export async function deferJob(params: RequeueParams): Promise<void> {
 }
 
 async function requeueJob(params: RequeueParams, eventType: "job.retried" | "job.deferred", attempts: 0 | 1): Promise<void> {
-	const db = await getDb();
-	db.transaction(
-		(tx) => {
-			const job = tx.select().from(abuseJobs).where(eq(abuseJobs.id, params.jobId)).get();
-			if (!job || job.leaseOwner !== params.owner) return;
-			tx.update(abuseJobs)
-				.set({
-					status: "queued",
-					leaseOwner: null,
-					leaseExpiresAt: null,
-					retryCount: job.retryCount + attempts,
-					nextAttemptAt: new Date(Date.now() + params.afterMs),
-					lastError: params.error,
-					updatedAt: now(),
-				})
-				.where(eq(abuseJobs.id, params.jobId))
-				.run();
-			recordEvent(tx, {
-				reportId: job.reportId!,
-				routeId: job.routeId ?? undefined,
-				runId: job.runId ?? undefined,
-				jobId: job.id,
-				eventType,
-				data: { retryCount: job.retryCount + attempts, error: params.error },
-			});
-		},
-		{ behavior: "immediate" }
+	await settleOwnedJob(
+		params.jobId,
+		params.owner,
+		(job) => ({ status: "queued", retryCount: job.retryCount + attempts, nextAttemptAt: new Date(Date.now() + params.afterMs), lastError: params.error }),
+		(job) => ({ eventType, data: { retryCount: job.retryCount + attempts, error: params.error } }),
 	);
 }
 
 export async function markJobUnknownExternalState(params: { jobId: bigint; owner: string; error: string }): Promise<void> {
-	const db = await getDb();
-	db.transaction(
-		(tx) => {
-			const job = tx.select().from(abuseJobs).where(eq(abuseJobs.id, params.jobId)).get();
-			if (!job || job.leaseOwner !== params.owner) return;
-			tx.update(abuseJobs)
-				.set({
-					status: "unknown_external_state",
-					leaseOwner: null,
-					leaseExpiresAt: null,
-					unknownExternalState: true,
-					lastError: params.error,
-					updatedAt: now(),
-				})
-				.where(eq(abuseJobs.id, params.jobId))
-				.run();
-			recordEvent(tx, {
-				reportId: job.reportId!,
-				routeId: job.routeId ?? undefined,
-				runId: job.runId ?? undefined,
-				jobId: job.id,
-				eventType: "job.unknown_external_state",
-				data: { error: params.error },
-			});
-		},
-		{ behavior: "immediate" }
+	await settleOwnedJob(
+		params.jobId,
+		params.owner,
+		() => ({ status: "unknown_external_state", unknownExternalState: true, lastError: params.error }),
+		() => ({ eventType: "job.unknown_external_state", data: { error: params.error } }),
 	);
 }
 
 /** Finish a retry-exhausted local job without misrepresenting it as an external ambiguity. */
-
 export async function failJob(params: { jobId: bigint; owner: string; error: string }): Promise<void> {
-	const db = await getDb();
-	db.transaction(
-		(tx) => {
-			const job = tx.select().from(abuseJobs).where(eq(abuseJobs.id, params.jobId)).get();
-			if (!job || job.leaseOwner !== params.owner) return;
-			tx.update(abuseJobs)
-				.set({
-					status: "failed",
-					leaseOwner: null,
-					leaseExpiresAt: null,
-					lastError: params.error,
-					updatedAt: now(),
-				})
-				.where(eq(abuseJobs.id, params.jobId))
-				.run();
-			recordEvent(tx, {
-				reportId: job.reportId!,
-				routeId: job.routeId ?? undefined,
-				runId: job.runId ?? undefined,
-				jobId: job.id,
-				eventType: "job.failed",
-				data: { error: params.error, retryCount: job.retryCount },
-			});
-		},
-		{ behavior: "immediate" },
+	await settleOwnedJob(
+		params.jobId,
+		params.owner,
+		() => ({ status: "failed", lastError: params.error }),
+		(job) => ({ eventType: "job.failed", data: { error: params.error, retryCount: job.retryCount } }),
 	);
 }
 
@@ -345,22 +360,16 @@ export async function recoverStaleJobs(): Promise<number> {
 		(tx) => {
 			const stale = tx
 				.select()
-				.from(abuseJobs)
-				.where(and(eq(abuseJobs.status, "running"), lte(abuseJobs.leaseExpiresAt, timestamp)))
+				.from(jobs)
+				.where(and(eq(jobs.status, "running"), lte(jobs.leaseExpiresAt, timestamp)))
 				.all();
 			for (const job of stale) {
-				const status: AbuseJobStatus = job.unknownExternalState ? "unknown_external_state" : "queued";
-				tx.update(abuseJobs)
+				const status: JobStatus = job.unknownExternalState ? "unknown_external_state" : "queued";
+				tx.update(jobs)
 					.set({ status, leaseOwner: null, leaseExpiresAt: null, nextAttemptAt: timestamp, updatedAt: timestamp })
-					.where(eq(abuseJobs.id, job.id))
+					.where(eq(jobs.id, job.id))
 					.run();
-				recordEvent(tx, {
-					reportId: job.reportId!,
-					routeId: job.routeId ?? undefined,
-					runId: job.runId ?? undefined,
-					jobId: job.id,
-					eventType: job.unknownExternalState ? "job.recovery_requires_reconciliation" : "job.lease_recovered",
-				});
+				recordJobEvent(tx, job, job.unknownExternalState ? "job.recovery_requires_reconciliation" : "job.lease_recovered");
 			}
 			return stale.length;
 		},

@@ -9,6 +9,7 @@ import * as toon from "@toon-format/toon";
 import { reportConfirmedEmailPhishing } from "../abuse/submission_reports";
 import { smtpReturnPath, smtpSender, smtpTransport } from "./config";
 import { createWebsiteSubmission } from "../submissions/website";
+import { fairKeyOfCaseId } from "../website/visit_queue/queue";
 import { defaultReasoning, defaultResponseModel } from "../openai/client";
 import { serviceIdentity } from "../network/service_identity";
 import { errorText } from "../util/error_text";
@@ -88,10 +89,12 @@ export async function handOffMailLinks(params: {
 }): Promise<NonNullable<EmailSubmissionData["linkedWebsites"]>> {
 	const createWebsite = params.createWebsite ?? createWebsiteSubmission;
 	const linked: NonNullable<EmailSubmissionData["linkedWebsites"]> = [];
+	// The email's links count against the share of whoever sent the email in.
+	const fairKey = await fairKeyOfCaseId(params.submissionId);
 	for (const url of getMailWebsiteUrls(params.mail)) {
 		try {
-			const submissionId = await createWebsite({ url, source: `email:${params.submissionId.toString()}`, ...params.reporter });
-			linked.push({ url, submissionId: submissionId.toString() });
+			const { id } = await createWebsite({ url, source: `email:${params.submissionId.toString()}`, ...params.reporter, fairKey });
+			linked.push({ url, submissionId: id.toString() });
 		} catch (error) {
 			console.error(`Failed to open a website case for ${url} linked from email ${params.submissionId.toString()}:`, error);
 		}

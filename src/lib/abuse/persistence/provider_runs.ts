@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../../db";
 import { isFabricBrowserSessionId } from "../../browser/fabric_session";
 import {
-	abuseJobs,
+	jobs,
 	abuseProviderRoutes,
 	abuseProviderRuns,
 	type AbuseProviderRun,
@@ -123,7 +123,7 @@ export async function failProviderSubmissionPreflight(params: {
 	const db = await getDb();
 	return db.transaction(
 		(tx) => {
-			const job = tx.select().from(abuseJobs).where(eq(abuseJobs.id, params.jobId)).get();
+			const job = tx.select().from(jobs).where(eq(jobs.id, params.jobId)).get();
 			if (!job
 				|| job.jobType !== "submit_provider"
 				|| job.status !== "running"
@@ -144,7 +144,7 @@ export async function failProviderSubmissionPreflight(params: {
 			if (!run || run.routeId !== route.id || run.executionStatus !== "starting") return false;
 
 			const timestamp = now();
-			tx.update(abuseJobs)
+			tx.update(jobs)
 				.set({
 					status: "failed",
 					leaseOwner: null,
@@ -152,7 +152,7 @@ export async function failProviderSubmissionPreflight(params: {
 					lastError: params.error,
 					updatedAt: timestamp,
 				})
-				.where(eq(abuseJobs.id, job.id))
+				.where(eq(jobs.id, job.id))
 				.run();
 			recordEvent(tx, {
 				reportId: route.reportId,
@@ -359,15 +359,15 @@ async function settleUnresolvedProviderRun(params: {
 			// this exact route; a later/manual job must not be rewritten.
 			const unresolvedJobs = tx
 				.select()
-				.from(abuseJobs)
+				.from(jobs)
 				.where(and(
-					eq(abuseJobs.routeId, route.id),
-					eq(abuseJobs.jobType, "submit_provider"),
-					eq(abuseJobs.status, "unknown_external_state"),
+					eq(jobs.routeId, route.id),
+					eq(jobs.jobType, "submit_provider"),
+					eq(jobs.status, "unknown_external_state"),
 				))
 				.all();
 			for (const job of unresolvedJobs) {
-				tx.update(abuseJobs)
+				tx.update(jobs)
 					.set({
 						status: "completed",
 						leaseOwner: null,
@@ -376,7 +376,7 @@ async function settleUnresolvedProviderRun(params: {
 						lastError: null,
 						updatedAt: timestamp,
 					})
-					.where(and(eq(abuseJobs.id, job.id), eq(abuseJobs.status, "unknown_external_state")))
+					.where(and(eq(jobs.id, job.id), eq(jobs.status, "unknown_external_state")))
 					.run();
 				recordEvent(tx, {
 					reportId: route.reportId,
@@ -677,13 +677,13 @@ export async function requeueNeverSentProviderRuns(params: {
 					.set({ status: "queued", updatedAt: timestamp })
 					.where(eq(abuseProviderRoutes.id, route.id))
 					.run();
-				const jobs = tx.select({ id: abuseJobs.id }).from(abuseJobs)
-					.where(and(eq(abuseJobs.routeId, route.id), eq(abuseJobs.jobType, "submit_provider"), eq(abuseJobs.status, "unknown_external_state")))
+				const unresolvedJobs = tx.select({ id: jobs.id }).from(jobs)
+					.where(and(eq(jobs.routeId, route.id), eq(jobs.jobType, "submit_provider"), eq(jobs.status, "unknown_external_state")))
 					.all();
-				for (const job of jobs) {
-					tx.update(abuseJobs)
+				for (const job of unresolvedJobs) {
+					tx.update(jobs)
 						.set({ status: "queued", leaseOwner: null, leaseExpiresAt: null, unknownExternalState: false, lastError: null, nextAttemptAt: timestamp, updatedAt: timestamp })
-						.where(eq(abuseJobs.id, job.id))
+						.where(eq(jobs.id, job.id))
 						.run();
 				}
 				recordEvent(tx, {
@@ -692,7 +692,7 @@ export async function requeueNeverSentProviderRuns(params: {
 					routeId: route.id,
 					runId: run.id,
 					eventType: "provider_run.requeued_never_sent",
-					data: { providerRegistryKey: params.providerRegistryKey, failureReason: params.neverSentFailure, jobIds: jobs.map((job) => job.id.toString()), reason: params.reason },
+					data: { providerRegistryKey: params.providerRegistryKey, failureReason: params.neverSentFailure, jobIds: unresolvedJobs.map((job) => job.id.toString()), reason: params.reason },
 				});
 				recomputeReportStatusInTransaction(tx, route.reportId, { reason: "provider_run_requeued_never_sent", routeId: route.id.toString() });
 				requeued.push(route.id);

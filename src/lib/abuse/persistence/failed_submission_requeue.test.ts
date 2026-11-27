@@ -5,7 +5,7 @@ import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
 import { routeFixture } from "../providers/kit/testing";
 import { AbuseRepository } from "../repository";
-import { abuseEvents, abuseJobs, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
+import { abuseEvents, jobs, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
 import { requeueBrandRefusedLinkedRoutes, requeueFailedPreMarkerSubmissions, requeueGoDaddyRecaptchaPreflights } from "./failed_submission_requeue";
 
 useTemporaryDatabase();
@@ -33,7 +33,7 @@ async function failedBeforeMarker(failure: string, provider: keyof typeof PROVID
 	if (!execution) throw new Error("Test route could not be claimed.");
 	const job = await AbuseRepository.enqueueJob({ jobType: "submit_provider", reportId: created.reportId, routeId: route.id, payload: {} });
 	const db = await getDb();
-	db.update(abuseJobs).set({ status: "running", leaseOwner: "worker" }).where(eq(abuseJobs.id, job.id)).run();
+	db.update(jobs).set({ status: "running", leaseOwner: "worker" }).where(eq(jobs.id, job.id)).run();
 	expect(await AbuseRepository.failProviderSubmissionPreflight({ jobId: job.id, owner: "worker", error: failure, routeStatus: "failed", reason: "retry_exhausted" })).toBeTrue();
 	expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "failed" });
 	return { reportId: created.reportId, route, run: execution.run, job };
@@ -41,7 +41,7 @@ async function failedBeforeMarker(failure: string, provider: keyof typeof PROVID
 
 async function queuedJobs(routeId: bigint) {
 	const db = await getDb();
-	return db.select().from(abuseJobs).where(eq(abuseJobs.routeId, routeId)).all().filter((job) => job.status === "queued");
+	return db.select().from(jobs).where(eq(jobs.routeId, routeId)).all().filter((job) => job.status === "queued");
 }
 
 describe("requeueFailedPreMarkerSubmissions", () => {

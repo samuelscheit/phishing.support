@@ -5,7 +5,7 @@ import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
-import { abuseJobs, abuseProviderRuns } from "../../schema";
+import { jobs, abuseProviderRuns } from "../../schema";
 import { ensureCorrespondencePolls, pollProviderCorrespondence } from "../../worker/correspondence";
 import { parseCloudflareOriginDisclosure } from "../../origin/disclosure";
 import { nextCorrespondencePollDelayMs } from "../../worker/schedule";
@@ -108,7 +108,7 @@ describe("Cloudflare correspondence polling", () => {
 	}
 
 	async function pollJobs(routeId: bigint) {
-		return (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, routeId)).all().filter((job) => job.jobType === "poll_provider_correspondence");
+		return (await getDb()).select().from(jobs).where(eq(jobs.routeId, routeId)).all().filter((job) => job.jobType === "poll_provider_correspondence");
 	}
 
 	test("a denied review queues exactly one decision follow-up, however often it is polled", async () => {
@@ -119,7 +119,7 @@ describe("Cloudflare correspondence polling", () => {
 		const { route } = await submittedCloudflareRoute();
 		await pollProviderCorrespondence({ routeId: route.id, jobId: 1n });
 		await pollProviderCorrespondence({ routeId: route.id, jobId: 2n });
-		const followUps = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all().filter((job) => job.jobType === "follow_up_provider_decision");
+		const followUps = (await getDb()).select().from(jobs).where(eq(jobs.routeId, route.id)).all().filter((job) => job.jobType === "follow_up_provider_decision");
 		expect(followUps).toHaveLength(1);
 		expect(followUps[0]).toMatchObject({ payload: { state: "denied", detail: "no_abuse_found" }, dedupeKey: `decision-follow-up:${route.id.toString()}:denied` });
 		// The denial is recorded as the provider's rejection; its emails stay unclassified.
@@ -245,7 +245,7 @@ describe("Cloudflare correspondence polling", () => {
 		const [first] = await pollJobs(route.id);
 		await pollProviderCorrespondence({ routeId: route.id, jobId: first!.id });
 		await pollProviderCorrespondence({ routeId: route.id, jobId: first!.id });
-		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, reportId)).all();
-		expect(jobs.filter(({ jobType }) => jobType === "report_origin_host")).toHaveLength(1);
+		const queuedJobs = (await getDb()).select().from(jobs).where(eq(jobs.reportId, reportId)).all();
+		expect(queuedJobs.filter(({ jobType }) => jobType === "report_origin_host")).toHaveLength(1);
 	});
 });

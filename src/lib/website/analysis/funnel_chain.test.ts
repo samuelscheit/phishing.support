@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { AbuseRepository } from "../../abuse/repository";
 import { FUNNEL_EVIDENCE_NAME, readFunnelFacts } from "../../abuse/funnel/facts";
 import { CHECKOUT_TEXT, LURE_TEXT, PRODUCTION_URLS } from "../../abuse/funnel/test_fixtures";
-import { abuseJobs } from "../../abuse/schema";
+import { jobs } from "../../abuse/schema";
 import { getDb } from "../../db";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
@@ -136,7 +136,7 @@ describe("a deceptive affiliate funnel, analyzed as one case", () => {
 			{ role: "network", site: "miamitrk.com", platform: "cake", affiliateId: "15065" },
 		]);
 		// Nothing more for the worker to resolve or mail.
-		const resolveJobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "resolve_report")).all();
+		const resolveJobs = (await getDb()).select().from(jobs).where(eq(jobs.jobType, "resolve_report")).all();
 		expect(resolveJobs.map(({ reportId }) => reportId)).toEqual(reports.map(({ id: reportId }) => reportId));
 	});
 

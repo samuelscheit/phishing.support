@@ -4,7 +4,7 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
-import type { AbuseJob } from "../schema";
+import type { Job } from "../schema";
 import { AbuseWorker } from "./";
 
 useTemporaryDatabase();
@@ -28,7 +28,7 @@ describe("the worker's lanes", () => {
 		const linkedSite = new Promise<void>((resolve) => { linked = resolve; });
 		const worker = new AbuseWorker({
 			pollMs: 5,
-			processJob: async (job: AbuseJob) => {
+			processJob: async (job: Job) => {
 				started.push(job.jobType);
 				if (job.jobType === "link_campaign") linked();
 				else if (job.jobType === "search_campaign_kits" || job.jobType === "analyze_kit_sibling") await blocked;
@@ -62,7 +62,7 @@ describe("the worker's lanes", () => {
 		const worker = new AbuseWorker({
 			pollMs: 5,
 			externalConcurrency: 2,
-			processJob: async (job: AbuseJob) => {
+			processJob: async (job: Job) => {
 				if (job.jobType === "check_site_liveness") checked();
 				else await blocked;
 			},

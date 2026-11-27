@@ -9,7 +9,7 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import type { WebsiteSubmissionData } from "../db/schema";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs } from "../abuse/schema";
+import { jobs } from "../abuse/schema";
 import { useTrackingTokenSecret } from "../abuse/security/test_helpers";
 import { reportExfiltrationBackend } from "../exfiltration/reporting";
 import type { ExfiltrationBackend } from "../exfiltration/types";
@@ -93,7 +93,7 @@ const linkAll = async (members: readonly CampaignSite[], dependencies: LinkDepen
 };
 const campaignOf = (member: CampaignSite) => CampaignRepository.campaignForMember(member);
 const rowCount = async (table: typeof campaignMembers | typeof campaignIndicators) => Number((await getDb()).select({ count: sql<number>`count(*)` }).from(table).get()!.count);
-const linkJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "link_campaign")).all();
+const linkJobs = async () => (await getDb()).select().from(jobs).where(eq(jobs.jobType, "link_campaign")).all();
 
 describe("a chain's sites as members", () => {
 	test("each site of a chain is judged by its own page: its step, its pages, its judged page", () => {

@@ -12,12 +12,12 @@ export type SubmissionRetryWithCase = SubmissionRetry & {
 
 export class SubmissionRetriesEntity {
 	/**
-	 * Claim a case for a retry: move it from `from` to running and record the
+	 * Claim a case for a retry: move it from `from` to `to` and record the
 	 * retry with the info and finding it had, in one transaction. Only the
 	 * request that moves it records a retry; a concurrent one finds the case no
 	 * longer at `from` and gets false.
 	 */
-	static async claim(params: { submissionId: bigint; from: SubmissionStatus; trigger: SubmissionRetryTrigger }): Promise<boolean> {
+	static async claim(params: { submissionId: bigint; from: SubmissionStatus; to: SubmissionStatus; trigger: SubmissionRetryTrigger }): Promise<boolean> {
 		const db = await getDb();
 		return db.transaction((tx) => {
 			const before = tx
@@ -27,7 +27,7 @@ export class SubmissionRetriesEntity {
 				.get();
 			if (!before) return false;
 			const now = new Date();
-			tx.update(submissions).set({ status: "running", updatedAt: now }).where(eq(submissions.id, params.submissionId)).run();
+			tx.update(submissions).set({ status: params.to, updatedAt: now }).where(eq(submissions.id, params.submissionId)).run();
 			tx.insert(submissionRetries).values({
 				id: generateId(),
 				submissionId: params.submissionId,

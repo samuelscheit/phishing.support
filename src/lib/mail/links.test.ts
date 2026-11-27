@@ -5,6 +5,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import { getMailWebsiteUrls } from "./parse";
 import { handOffMailLinks, parseMail } from "./ai";
 import { createWebsiteSubmission } from "../submissions/website";
+import { runQueuedVisits } from "../website/visit_queue/test_helpers";
 
 useTemporaryDatabase();
 
@@ -61,7 +62,7 @@ test("images and stylesheets are not linked pages", () => {
 
 test("a share.google link opens its own case even after another share.google code was judged a prank", async () => {
 	// Submission 362635609681956871: an earlier share.google code led to a troll page and was marked invalid.
-	const prankId = await createWebsiteSubmission({ url: "https://share.google/ZAq2FghpGquJH6ShL" }, async () => undefined);
+	const { id: prankId } = await createWebsiteSubmission({ url: "https://share.google/ZAq2FghpGquJH6ShL" });
 	await SubmissionsEntity.update(prankId, { status: "invalid" });
 
 	const started: string[] = [];
@@ -70,8 +71,9 @@ test("a share.google link opens its own case even after another share.google cod
 		mail,
 		submissionId: 375160822747370869n,
 		reporter: {},
-		createWebsite: (options) => createWebsiteSubmission(options, async ({ url }) => started.push(url)),
+		createWebsite: createWebsiteSubmission,
 	});
+	await runQueuedVisits(async ({ url }) => started.push(url));
 
 	expect(linked).toHaveLength(1);
 	expect(linked[0]!.url).toBe("https://share.google/xnf72t40tx4fzvKM2");
@@ -83,7 +85,7 @@ test("a share.google link opens its own case even after another share.google cod
 });
 
 test("a link that already has a case links that case; one failing link does not drop the others", async () => {
-	const existingId = await createWebsiteSubmission({ url: "https://kit.example.com/login" }, async () => undefined);
+	const { id: existingId } = await createWebsiteSubmission({ url: "https://kit.example.com/login" });
 	await SubmissionsEntity.update(existingId, { status: "reported" });
 
 	const linked = await handOffMailLinks({
@@ -92,7 +94,7 @@ test("a link that already has a case links that case; one failing link does not 
 		reporter: {},
 		createWebsite: async (options) => {
 			if (options.url.includes("broken")) throw new Error("database is locked");
-			return createWebsiteSubmission(options, async () => undefined);
+			return createWebsiteSubmission(options);
 		},
 	});
 

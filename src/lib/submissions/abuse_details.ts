@@ -5,7 +5,7 @@ import { buildProviderReportNarrative, reportAccess, type ReportAccess } from "@
 import { websiteAccessSteps } from "@/lib/abuse/access_steps";
 import { abuseEmailCaseUrl } from "@/lib/abuse/mail/draft";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
-import type { AbuseJobType, AbuseMailClassification, AbuseProviderRoute, AbuseReport } from "@/lib/abuse/schema";
+import type { JobType, AbuseMailClassification, AbuseProviderRoute, AbuseReport } from "@/lib/abuse/schema";
 import { describeDecisionFollowUp, type DecisionFollowUpSummary } from "@/lib/abuse/followup/describe";
 import { asRecord } from "../util/values";
 import { parseFunnelPartyTarget, type FunnelPartyTarget } from "@/lib/abuse/funnel/target";
@@ -54,7 +54,7 @@ export type SubmissionReportMessage = {
 /** Work queued on a route that the case page tells as what happens next. */
 export type RouteNextWork = { kind: "receipt_lookup" | "status_check" | "decision_answer" | "submission"; at: Date };
 
-const NEXT_WORK: Partial<Record<AbuseJobType, RouteNextWork["kind"]>> = {
+const NEXT_WORK: Partial<Record<JobType, RouteNextWork["kind"]>> = {
 	find_provider_receipt: "receipt_lookup",
 	poll_provider_correspondence: "status_check",
 	follow_up_provider_decision: "decision_answer",

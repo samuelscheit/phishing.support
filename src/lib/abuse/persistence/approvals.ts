@@ -2,7 +2,8 @@ import { and, asc, eq, isNotNull } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { generateId } from "../../db/ids";
-import { abuseJobs, abuseProviderRoutes, abuseReports, type AbuseProviderRoute } from "../schema";
+import { jobs, abuseProviderRoutes, abuseReports, type AbuseProviderRoute } from "../schema";
+import { insertQueuedJob } from "./jobs";
 import { recomputeReportStatusInTransaction } from "./report_status";
 import { now, recordEvent } from "./shared";
 
@@ -68,22 +69,7 @@ export async function approveDraftedRoute(routeId: bigint, draft: ApprovalDraft)
 			.get();
 		if (!updated) return false;
 		recordEvent(tx, { reportId: route.reportId, targetId: route.targetId, routeId, eventType: "route.status_changed", data: { from: "awaiting_approval", to: "verified", reason: "operator_approved" } });
-		const jobId = generateId();
-		tx.insert(abuseJobs).values({
-			id: jobId,
-			jobType: "send_email",
-			reportId: route.reportId,
-			routeId,
-			payload: {},
-			dedupeKey: `email:${routeId.toString()}`,
-			status: "queued",
-			retryCount: 0,
-			nextAttemptAt: timestamp,
-			unknownExternalState: false,
-			createdAt: timestamp,
-			updatedAt: timestamp,
-		}).run();
-		recordEvent(tx, { reportId: route.reportId, routeId, jobId, eventType: "job.queued", data: { jobType: "send_email" } });
+		insertQueuedJob(tx, { jobType: "send_email", reportId: route.reportId, routeId, dedupeKey: `email:${routeId.toString()}` });
 		recomputeReportStatusInTransaction(tx, route.reportId, { reason: "operator_approved", routeId: routeId.toString() });
 		return true;
 	}, { behavior: "immediate" });

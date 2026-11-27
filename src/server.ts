@@ -3,8 +3,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createServer } from "node:http";
 
 import { SubmissionsEntity } from "./lib/db/entities/submissions";
-import { startWebsiteAutoRetries } from "./lib/submissions/website";
-import { retryInterruptedWebsiteAnalysis } from "./lib/website/analysis/ai";
 import { startAbuseWorker, stopAbuseWorker } from "./lib/abuse/worker";
 import { startMailboxListener, stopMailboxListener } from "./lib/imap/listener";
 import { startRelayBounceIntake, stopRelayBounceIntake } from "./lib/imap/maildir";
@@ -26,21 +24,14 @@ const handler = app.getRequestHandler();
 
 await app.prepare();
 
-// If the process previously crashed/restarted, we may have submissions stuck in `running`.
-// Mark them as failed; a website visit cut off this way is queued for the automatic retry.
+// An email analysis the last process died in is marked failed. Website visits
+// are jobs of the reporting worker's visit queue: it resumes them on start.
 try {
-	const failed = await SubmissionsEntity.failAllRunning();
-	for (const { id } of failed) await retryInterruptedWebsiteAnalysis(id);
-	if (failed.length > 0) {
-		console.warn(`Marked ${failed.length} running submissions as failed on startup; website visits are retried automatically.`);
-	}
+	const failed = await SubmissionsEntity.failRunningEmails();
+	if (failed.length > 0) console.warn(`Marked ${failed.length} running email analyses as failed on startup.`);
 } catch (err) {
-	console.error("Failed to mark running submissions as failed on startup:", err);
+	console.error("Failed to mark running email analyses as failed on startup:", err);
 }
-
-// A capture that failed because the browser service was down is retried on
-// its own schedule rather than left failed.
-const stopWebsiteAutoRetries = startWebsiteAutoRetries();
 
 // The durable reporting worker files every confirmed report; the mailbox
 // listener turns forwarded phishing mail into submissions and records provider
@@ -70,7 +61,6 @@ server.on("request", (req, res) => {
 
 const shutdown = async (signal: string) => {
 	console.log(`Received ${signal}, shutting down...`);
-	stopWebsiteAutoRetries();
 	await stopMailboxListener();
 	await stopRelayBounceIntake();
 	await stopAbuseWorker();

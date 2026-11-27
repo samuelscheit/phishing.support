@@ -8,7 +8,7 @@ import { runReportInvestigation, type InvestigationDependencies } from "../../in
 import { readInvestigationJobPayload } from "../../investigation/payload";
 import type { WebsiteNavigationHop, WebsiteSiteAssessment } from "../../website/types";
 import { AbuseRepository } from "../repository";
-import { abuseJobs } from "../schema";
+import { jobs } from "../schema";
 import { reportConfirmedWebsiteAbuse } from "../submission_reports";
 import { buildRedirectorRequest, reportRedirector, type RedirectorReportDependencies } from "./redirector_report";
 import { redirectorOf, type RedirectorCheck, type RedirectorOf } from "./redirector_watch";
@@ -232,7 +232,7 @@ describe("reporting a confirmed page's redirector", () => {
 
 	test("the investigation reports the redirector with the page's screenshot before it releases the page's report", async () => {
 		const page = await confirmedThrough(440000000000000032n, ROTATOR_HOPS);
-		const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, page.reportId)).all().find(({ jobType }) => jobType === "investigate_report")!;
+		const job = (await getDb()).select().from(jobs).where(eq(jobs.reportId, page.reportId)).all().find(({ jobType }) => jobType === "investigate_report")!;
 		const net = offline();
 		const deps: Partial<InvestigationDependencies> = {
 			reportRedirector: (params) => reportRedirector(params, net.dependencies),

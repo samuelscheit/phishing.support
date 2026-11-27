@@ -1,10 +1,11 @@
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { queryRDAPDomain } from "../../website/info/info";
-import { createWebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
+import { createWebsiteSubmission, type WebsiteSubmission, type WebsiteSubmissionOptions } from "../../submissions/website";
+import { fairKeyOfCaseId } from "../../website/visit_queue/queue";
 import { normalizeDomain, registrableDomain } from "../security/security";
 import { getProviderSubmissionProviderForMailbox, providerContactRoute } from "../providers";
 import { AbuseRepository } from "../repository";
-import type { AbuseJob } from "../schema";
+import type { Job } from "../schema";
 import { parseJobBigInt, throwIfAborted } from "../worker/shared";
 import { queueRouteDelivery } from "../worker/schedule";
 import { parseCloudflareOriginDisclosure } from "./disclosure";
@@ -30,7 +31,7 @@ export type OriginHostReportDependencies = {
 	resolveNetworks?: typeof resolveOriginHostNetworks;
 	findServers?: typeof findOriginServers;
 	discoverSiblings?: typeof discoverSiblingDomains;
-	createSiblingSubmission?: (options: WebsiteSubmissionOptions) => Promise<bigint>;
+	createSiblingSubmission?: (options: WebsiteSubmissionOptions) => Promise<WebsiteSubmission>;
 	kitFacts?: typeof capturedKitFacts;
 	registeredAt?: (domain: string) => Promise<string | undefined>;
 	passiveDns?: typeof passiveDnsHistory;
@@ -341,15 +342,17 @@ async function completeOriginHostReport(params: {
 	const registeredAt = dependencies.registeredAt ?? domainRegisteredAt;
 	const siblingSubmissions: OriginHostSnapshot["siblings"] = [];
 	const createSibling = dependencies.createSiblingSubmission ?? createWebsiteSubmission;
+	const siblingFairKey = await fairKeyOfCaseId(report.submissionId);
 	for (const sibling of siblingDiscovery.confirmed) {
 		try {
 			throwIfAborted(params.signal);
-			const submissionId = await createSibling({
+			const { id: submissionId } = await createSibling({
 				url: sibling.url,
 				source: `origin-sibling:${report.submissionId?.toString() ?? "standalone"}:${message.id.toString()}`,
 				reporterIp: report.requesterIp ?? undefined,
 				reporterCountry: report.requesterCountry ?? undefined,
 				reporterHeaders: report.requesterHeaders ?? undefined,
+				fairKey: siblingFairKey,
 			});
 			const siblingRegisteredAt = await registeredAt(sibling.domain).catch(() => undefined);
 			siblingSubmissions.push({ ...sibling, ...(siblingRegisteredAt ? { registeredAt: siblingRegisteredAt } : {}), submissionId: submissionId.toString() });
@@ -443,7 +446,7 @@ async function completeOriginHostReport(params: {
 	await AbuseRepository.recomputeReportStatus(report.id);
 }
 
-export async function reportOriginHostJob(job: Pick<AbuseJob, "id" | "payload">, reportId: bigint, signal?: AbortSignal): Promise<void> {
+export async function reportOriginHostJob(job: Pick<Job, "id" | "payload">, reportId: bigint, signal?: AbortSignal): Promise<void> {
 	const progress = job.payload?.progress === undefined ? undefined : originSweepProgressSchema.parse(job.payload.progress);
 	await reportOriginHost({
 		reportId,

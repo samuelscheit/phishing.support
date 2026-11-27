@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { validateAbuseReportRequest } from "@/lib/abuse/contracts";
 import { TRYLEVO_MAIL } from "@/lib/abuse/mail/trylevo_mail.fixtures";
 import { AbuseRepository } from "@/lib/abuse/repository";
-import { abuseArtifacts, abuseEvents, abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseRouteStatus, type AbuseRouteType } from "@/lib/abuse/schema";
+import { abuseArtifacts, abuseEvents, jobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseRouteStatus, type AbuseRouteType } from "@/lib/abuse/schema";
 import { getDb } from "@/lib/db";
 import { generateId } from "@/lib/db/ids";
 import { sha256Hex } from "@/lib/util/hash";
@@ -19,7 +19,7 @@ async function report(params: { submissionId: bigint; target: string; url: strin
 	const db = await getDb();
 	db.update(abuseReports).set({ submissionId: params.submissionId, idempotencyKey: params.idempotencyKey ?? null, status: params.status, createdAt: trylevoAt(params.createdAt), updatedAt: trylevoAt(params.createdAt) }).where(eq(abuseReports.id, created.reportId)).run();
 	// The queued resolution of a report made through the API is not part of this case.
-	db.delete(abuseJobs).where(eq(abuseJobs.reportId, created.reportId)).run();
+	db.delete(jobs).where(eq(jobs.reportId, created.reportId)).run();
 	for (const name of params.evidence) {
 		const blob = Buffer.from(name);
 		db.insert(abuseArtifacts).values({ id: generateId(), reportId: created.reportId, name, kind: "user_evidence_original", mimeType: name.endsWith(".png") ? "image/png" : "application/json", sha256: sha256Hex(blob), size: blob.length, blob, createdAt: trylevoAt(params.createdAt) }).run();
@@ -66,7 +66,7 @@ async function mail(owner: Owner, routeId: bigint, params: {
 }
 
 async function job(owner: Owner, routeId: bigint, jobType: "find_provider_receipt" | "poll_provider_correspondence", at: string) {
-	(await getDb()).insert(abuseJobs).values({ id: generateId(), jobType, reportId: owner.reportId, routeId, status: "queued", nextAttemptAt: trylevoAt(at), payload: {} }).run();
+	(await getDb()).insert(jobs).values({ id: generateId(), jobType, reportId: owner.reportId, routeId, status: "queued", nextAttemptAt: trylevoAt(at), payload: {} }).run();
 }
 
 const status = (key: string, routeId: bigint, state: string) => `provider-api:${key}:status:${routeId}:${state}`;

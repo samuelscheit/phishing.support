@@ -15,10 +15,10 @@ import { listSiteChecksForTargets, recordSiteCheck } from "@/lib/liveness/reposi
 import { trylevoAt } from "@/lib/submissions/trylevo_reports.fixtures";
 import { sha256Hex } from "@/lib/util/hash";
 import { AbuseRepository } from "../repository";
-import { abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
+import { jobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
 import { hostMoveNotice } from "./notice";
 import { reportHostMove } from "./report";
-import { check, DEMO_JS, events, jobs, nextCheckAt, recordingSend, reportedAt, resolving, site, trylevo } from "./report.fixtures";
+import { check, DEMO_JS, events, jobsOfType, nextCheckAt, recordingSend, reportedAt, resolving, site, trylevo } from "./report.fixtures";
 
 useTemporaryDatabase();
 
@@ -29,7 +29,7 @@ const moveKinds = async (reportId: bigint) => (await events(reportId, HOST_MOVED
 });
 const actions = async (reportId: bigint) => (await events(reportId, HOST_MOVE_ACTION_EVENT)).map((event) => (event.data as { action: string }).action);
 const actOn = async (reportId: bigint, index: number, dependencies: Parameters<typeof reportHostMove>[1]) => {
-	const job = (await jobs("report_host_move"))[index];
+	const job = (await jobsOfType("report_host_move"))[index];
 	await reportHostMove({ reportId, key: String(job!.payload!.key) }, dependencies);
 };
 
@@ -57,7 +57,7 @@ describe("a site flapping between two hosts (al-tawaqal-poultry-farm.pro, AS5704
 		await check(targetId, site(["153.75.235.103"], day("28T08:00:00"), { domain }));
 		await check(targetId, site(["147.90.13.47"], day("29T08:00:00"), { domain }));
 		expect(await moveKinds(reportId)).toEqual(["HOSTKEY->INTERSERVER-LAX:served"]);
-		expect(await jobs("report_host_move")).toHaveLength(1);
+		expect(await jobsOfType("report_host_move")).toHaveLength(1);
 	});
 
 	test("an address the site resolved to before checks recorded networks is no move either (the production checks of 21–24 Nov)", async () => {
@@ -88,7 +88,7 @@ describe("a site flapping between two hosts (al-tawaqal-poultry-farm.pro, AS5704
 		await check(targetId, site(["85.137.52.128"], day("27T08:00:00"), { domain }));
 		await check(targetId, site(["151.101.1.195"], day("27T09:00:00"), { domain }));
 		await check(targetId, site(["23.215.0.136"], day("28T08:00:00"), { domain }));
-		expect(await jobs("report_host_move")).toHaveLength(3);
+		expect(await jobsOfType("report_host_move")).toHaveLength(3);
 		const { send } = recordingSend();
 		// The first move is no longer where the site is: nothing is sent for it.
 		await actOn(reportId, 0, { resolveIp: resolving("abuse-ams@v-sys.org", 43641).resolveIp, send });
@@ -150,7 +150,7 @@ describe("what proves the moved site is the reported one", () => {
 		const { reportId, targetId, domain } = await reportedAt("5.161.1.1", 213230, "Hetzner Online GmbH");
 		await check(targetId, site(["85.137.52.128"], day("27T08:00:00"), { domain, page: 404 }));
 		expect(await moveKinds(reportId)).toEqual(["Hetzner Online GmbH->Sollutium-NL:unknown"]);
-		expect(await jobs("report_host_move")).toEqual([]);
+		expect(await jobsOfType("report_host_move")).toEqual([]);
 		// No captured file of the kit to compare: unknown too.
 		const other = await reportedAt("5.161.1.1", 213230, "Hetzner Online GmbH");
 		await check(other.targetId, { ...site(["85.137.52.128"], day("27T08:00:00"), { domain }), proofFiles: async () => [] });
@@ -162,9 +162,9 @@ describe("recording and acting survive failures", () => {
 	test("a move confirmed before a crash that lost its job is queued by the next check", async () => {
 		const owner = await trylevo();
 		await check(owner.targetId, site(["85.137.52.128"], trylevoAt("21:30:05")));
-		(await getDb()).delete(abuseJobs).where(eq(abuseJobs.jobType, "report_host_move")).run();
+		(await getDb()).delete(jobs).where(eq(jobs.jobType, "report_host_move")).run();
 		await check(owner.targetId, site(["85.137.52.128"], trylevoAt("22:30:05")));
-		expect((await jobs("report_host_move")).map((job) => job.payload?.key)).toEqual([`${owner.targetId}->as:43641`]);
+		expect((await jobsOfType("report_host_move")).map((job) => job.payload?.key)).toEqual([`${owner.targetId}->as:43641`]);
 		expect(await events(owner.reportId, HOST_MOVED_EVENT)).toHaveLength(1);
 	});
 
@@ -217,7 +217,7 @@ describe("whom the new host's report goes to", () => {
 		const { sent, send } = recordingSend();
 		await actOn(owner.reportId, 0, { resolveIp: resolving("abuse@hetzner.example", 213230).resolveIp, send });
 		expect((await events(owner.reportId, HOST_MOVE_ACTION_EVENT)).map((event) => event.data as { action: string; status?: string }).find(({ action }) => action === "not_sent")).toMatchObject({ status: "discarded" });
-		expect(await jobs("send_email")).toEqual([]);
+		expect(await jobsOfType("send_email")).toEqual([]);
 		const cloudflare = sent.find(({ recipient }) => recipient === "abusereply@cloudflare.com")!;
 		expect(cloudflare.body).not.toContain("We have told the new host");
 	});

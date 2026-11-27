@@ -1,20 +1,22 @@
 import { ArtifactsEntity } from "@/lib/db/entities/artifacts";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
 import { generateId } from "@/lib/db/ids";
-import { analyzeWebsite, type AnalyzeWebsiteOptions } from "@/lib/website/analysis/ai";
+import type { AnalyzeWebsiteOptions } from "@/lib/website/analysis/ai";
 import type { ReporterMetadata } from "@/lib/http/reporter_headers";
 import { websiteSite } from "@/lib/website/info/site";
-import { analyzedPage, latestArtifactNamed, navigationToPage, websiteCaptureFileNames } from "@/lib/website/visit/capture_files";
-import type { SubmissionRetryTrigger } from "@/lib/db/schema";
+import type { SubmissionStatus } from "@/lib/db/schema";
+import { enqueueWebsiteVisit, REPORTER_MHTML_NAME } from "@/lib/website/visit_queue/queue";
 import { claimRetry, getRetryableSubmission, SubmissionRetryError } from "./retry";
 import type { ReporterInstructions } from "./instructions";
 
 export { SubmissionRetryError } from "./retry";
 
 export type WebsiteSubmissionOptions = ReporterMetadata
-	& Pick<AnalyzeWebsiteOptions, "url" | "instructions" | "mhtmlSnapshot" | "archivedUrl" | "navigationHops" | "screenshotSnapshot" | "captureRoute" | "verificationGate" | "kitResources" | "hiddenFrames" | "device">
+	& Pick<AnalyzeWebsiteOptions, "url" | "instructions" | "mhtmlSnapshot">
 	& {
 		source?: string;
+		/** The share its visit counts against: the case's that caused it (a kit, origin or redirector sibling's parent). */
+		fairKey?: string;
 		/**
 		 * Opens a separate case for another visit of a site that already has
 		 * one, named by this key (a redirector watch's daily check). Without it
@@ -27,48 +29,6 @@ export type WebsiteSubmissionOptions = ReporterMetadata
 		 */
 		rereport?: boolean;
 	};
-
-const AUTO_RETRY_POLL_MS = 60_000;
-
-/**
- * Re-queue failed analyses whose automatic retry (a browser-service failure,
- * or a flow step not seen in that visit) has waited out its backoff. They go
- * through the normal retry boundary, so a case that has
- * since been reported or retried by hand is left alone.
- */
-export async function runDueWebsiteAutoRetries(params: {
-	now?: Date;
-	startAnalysis?: (options: AnalyzeWebsiteOptions) => Promise<unknown>;
-} = {}): Promise<number> {
-	let started = 0;
-	for (const { id } of await SubmissionsEntity.listDueWebsiteAutoRetries(params.now ?? new Date())) {
-		try {
-			await retryWebsiteAnalysis(id, { trigger: "automatic", startAnalysis: params.startAnalysis });
-			started++;
-		} catch (error) {
-			if (!(error instanceof SubmissionRetryError)) throw error;
-			console.warn(`Automatic retry of website analysis ${id.toString()} skipped: ${error.message}`);
-			// A case the retry boundary refuses (reported, or retried by hand) is never
-			// due again; left scheduled, it would take a sweep slot on every pass.
-			const submission = await SubmissionsEntity.get(id);
-			if (submission?.data.kind === "website" && submission.status === "failed" && submission.data.website.autoRetry) {
-				await SubmissionsEntity.update(id, { data: { kind: "website", website: { ...submission.data.website, autoRetry: undefined } } });
-			}
-		}
-	}
-	return started;
-}
-
-/** Poll for due automatic retries until the returned stop function is called. */
-export function startWebsiteAutoRetries(): () => void {
-	const timer = setInterval(() => {
-		void runDueWebsiteAutoRetries().then((started) => {
-			if (started > 0) console.warn(`Automatically retried ${started} website analyses.`);
-		}).catch((error) => console.error("Automatic website analysis retry failed:", error));
-	}, AUTO_RETRY_POLL_MS);
-	timer.unref?.();
-	return () => clearInterval(timer);
-}
 
 /**
  * The address of the site a submitted URL points at. Kits that swap their page
@@ -91,117 +51,66 @@ export function websiteSubmissionDedupeKey(url: string, visit?: string): string 
 	return `website-${websiteSite(url)}${visit ? `#${visit}` : ""}`;
 }
 
-export async function createWebsiteSubmission(
-	options: WebsiteSubmissionOptions,
-	startAnalysis: (options: AnalyzeWebsiteOptions) => Promise<unknown> = analyzeWebsite,
-): Promise<bigint> {
-	const streamId = generateId();
+/** A website case as `createWebsiteSubmission` left it: new and queued, or the site's existing case. */
+export type WebsiteSubmission = { id: bigint; status: SubmissionStatus };
+
+/**
+ * Open a website case and queue its visit, or return the site's existing
+ * case. The visit runs when the visit queue gets to it (website/visit_queue),
+ * never at once: a reporter's flood of URLs waits its share instead of
+ * starting a browser per URL.
+ */
+export async function createWebsiteSubmission(options: WebsiteSubmissionOptions): Promise<WebsiteSubmission> {
+	const id = generateId();
 	const url = websiteSubmissionUrl(options.url);
-	const { source, visit, rereport, ...analysisOptions } = options;
+	const { source, visit, rereport, fairKey, mhtmlSnapshot, instructions, reporterIp, reporterCountry, reporterHeaders } = options;
+	const caseSource = source || options.url;
 
 	const existingId = await SubmissionsEntity.create({
 		kind: "website",
-		data: { kind: "website", website: { url, ...(options.instructions ? { instructions: options.instructions } : {}) } },
-		dedupeKey: websiteSubmissionDedupeKey(url, rereport ? `rereport-${streamId.toString()}` : visit),
-		// The worker starts immediately after insertion. Mark it running at the
-		// durable boundary so a process restart cannot leave a submission looking
-		// perpetually new while its first WHOIS lookup is in flight.
-		status: "running",
-		source: source || options.url,
-		reporterIp: options.reporterIp,
-		reporterCountry: options.reporterCountry,
-		reporterHeaders: options.reporterHeaders,
-		id: streamId,
+		data: { kind: "website", website: { url, ...(instructions ? { instructions } : {}) } },
+		dedupeKey: websiteSubmissionDedupeKey(url, rereport ? `rereport-${id.toString()}` : visit),
+		status: "queued",
+		source: caseSource,
+		reporterIp,
+		reporterCountry,
+		reporterHeaders,
+		id,
 	});
+	if (existingId !== id) {
+		const existing = await SubmissionsEntity.get(existingId);
+		return { id: existingId, status: existing?.status ?? "queued" };
+	}
 
-	if (existingId !== streamId) return existingId;
-
-	startAnalysis({ submissionId: streamId, ...analysisOptions, url }).catch(console.error);
-
-	return streamId;
+	if (mhtmlSnapshot?.byteLength) {
+		await ArtifactsEntity.saveBuffer({ submissionId: id, kind: "mhtml", name: REPORTER_MHTML_NAME, mimeType: "multipart/related", buffer: mhtmlSnapshot });
+	}
+	await enqueueWebsiteVisit({ submission: { id, reporterIp: reporterIp ?? null, source: caseSource }, trigger: "initial", fairKey });
+	return { id, status: "queued" };
 }
 
 /**
- * Re-run a failed or unreported website analysis without creating a second
- * submission. When a failed attempt captured an MHTML archive, it is supplied
- * to the retry so a transient model failure cannot cause the site to be
- * fetched again after it has changed or started redirecting scanners. A case
- * judged not reportable was fully judged on its capture; judging that capture
- * again gives the same verdict, so it visits the site again.
+ * Retry a failed or unreported website case by hand: claimed at once (the
+ * cooldown and the race are decided here), visited when the queue gets to it.
  */
 export async function retryWebsiteAnalysis(
 	submissionId: bigint,
-	{ trigger = "manual", startAnalysis = analyzeWebsite, ...replacement }: {
-		/** Someone asked for it, or the automatic retry of a browser-service failure or restart did. */
-		trigger?: SubmissionRetryTrigger;
+	replacement: {
 		/**
 		 * The reporter's instructions this retry replaces the stored ones with,
 		 * `undefined` to clear them; without the key the stored ones are kept.
 		 */
 		instructions?: ReporterInstructions;
-		startAnalysis?: (options: AnalyzeWebsiteOptions) => Promise<unknown>;
 	} = {},
 ): Promise<void> {
 	const { submission } = await getRetryableSubmission(submissionId, "website");
-	const url = submission.data.kind === "website" ? submission.data.website?.url : undefined;
-	if (!url) throw new SubmissionRetryError("The original website URL is unavailable.");
-
-	// The page the verdict rested on, with the chain as it stood when it was shown.
 	const websiteData = submission.data.kind === "website" ? submission.data.website : undefined;
-	const analyzed = websiteData ? analyzedPage(websiteData) : undefined;
-	const artifactList = await ArtifactsEntity.listForSubmission(submissionId);
-	const names = websiteCaptureFileNames(analyzed?.page ?? { route: 0, step: 0 });
-	const mhtmlArtifact = latestArtifactNamed(artifactList, names.mhtml);
-	const screenshotArtifact = latestArtifactNamed(artifactList, names.screenshot);
+	if (!websiteData?.url) throw new SubmissionRetryError("The original website URL is unavailable.");
 
-	let mhtmlSnapshot: Buffer | undefined;
-	let screenshotSnapshot: Buffer | undefined;
-	// A cloaked capture holds only the decoy, and an unfinished flow only the
-	// page before the step it could not take, often a one-time gate URL that no
-	// longer loads; a retry must visit the site again from the submitted URL.
-	// A page of a rotating link's later route is not where the link leads a
-	// first walk, which a retry starts again as.
-	const retainedArchiveHasTrustedProvenance = Boolean(
-		submission.status === "failed"
-		&& websiteData
-		&& analyzed
-		&& analyzed.page.route === 0
-		&& websiteData.cloaking?.outcome !== "unresolved"
-		&& !websiteData.unfinishedFlow,
-	);
-	if (mhtmlArtifact && retainedArchiveHasTrustedProvenance) {
-		const artifact = await ArtifactsEntity.get(mhtmlArtifact.id);
-		if (artifact?.blob?.byteLength) mhtmlSnapshot = artifact.blob;
-	}
-	if (screenshotArtifact && retainedArchiveHasTrustedProvenance) {
-		const artifact = await ArtifactsEntity.get(screenshotArtifact.id);
-		if (artifact?.blob?.byteLength) screenshotSnapshot = artifact.blob;
-	}
-
-	await claimRetry(submission, trigger);
-	const instructions = "instructions" in replacement ? replacement.instructions : websiteData?.instructions;
-	if ("instructions" in replacement && websiteData) {
+	await claimRetry(submission, "manual", { to: "queued" });
+	if ("instructions" in replacement) {
+		const { instructions } = replacement;
 		await SubmissionsEntity.update(submissionId, { data: { kind: "website", website: { ...websiteData, instructions } } });
 	}
-
-	void startAnalysis({
-		submissionId,
-		url,
-		...(instructions ? { instructions } : {}),
-		mhtmlSnapshot,
-		archivedUrl: analyzed?.hop.url,
-		navigationHops: analyzed ? navigationToPage(analyzed.hops, analyzed.hop) : undefined,
-		trustMhtmlDocumentLocation: Boolean(mhtmlSnapshot),
-		verificationGate: mhtmlSnapshot ? websiteData?.verificationGate : undefined,
-		kitResources: mhtmlSnapshot ? websiteData?.kitResources : undefined,
-		hiddenFrames: mhtmlSnapshot ? websiteData?.hiddenFrames : undefined,
-		device: mhtmlSnapshot ? websiteData?.device : undefined,
-		screenshotSnapshot,
-		reporterIp: submission.reporterIp ?? undefined,
-		reporterCountry: submission.reporterCountry ?? undefined,
-		reporterHeaders: submission.reporterHeaders ?? undefined,
-		reuseEvidenceArtifacts: Boolean(mhtmlSnapshot && screenshotArtifact && retainedArchiveHasTrustedProvenance),
-	}).catch((error) => {
-		console.error("Retried website analysis failed:", error);
-	});
+	await enqueueWebsiteVisit({ submission, trigger: "manual", fromStatus: submission.status });
 }

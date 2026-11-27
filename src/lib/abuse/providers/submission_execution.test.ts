@@ -16,7 +16,7 @@ import {
 } from "./submission_contracts";
 import { findProviderReceipt } from "../worker/receipt";
 import { getDb } from "../../db";
-import { abuseJobs, abuseProviderRuns } from "../schema";
+import { jobs, abuseProviderRuns } from "../schema";
 import { and, eq } from "drizzle-orm";
 import { hashStableJson } from "../../util/hash";
 
@@ -348,7 +348,7 @@ describe("provider submission execution boundary", () => {
 		const before = Date.now();
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).rejects.toBeInstanceOf(ProviderSubmissionUnknownExternalStateError);
 		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
-		const lookupJobs = async () => (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.routeId, route.id), eq(abuseJobs.jobType, "find_provider_receipt"))).all();
+		const lookupJobs = async () => (await getDb()).select().from(jobs).where(and(eq(jobs.routeId, route.id), eq(jobs.jobType, "find_provider_receipt"))).all();
 		const [first] = await lookupJobs();
 		expect(first).toMatchObject({ status: "queued", runId: run!.id, dedupeKey: `find-provider-receipt:${run!.id}` });
 		// A minute after the submission: a provider can list a stored report late.
@@ -362,7 +362,7 @@ describe("provider submission execution boundary", () => {
 		await findProviderReceipt({ runId: run!.id, jobId: first!.id, providerFor });
 		expect(lookups).toEqual([{ sentAt: submittedAt, payload: { adapter: "test_provider", target: "example.com" } }]);
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "unknown_external_state" });
-		(await getDb()).update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, first!.id)).run();
+		(await getDb()).update(jobs).set({ status: "completed" }).where(eq(jobs.id, first!.id)).run();
 		const successor = (await lookupJobs()).find((job) => job.status === "queued");
 		const untilNext = successor!.nextAttemptAt.getTime() - submittedAt.getTime();
 		expect(untilNext).toBeGreaterThan(3 * 60_000 - 2_000);
@@ -373,7 +373,7 @@ describe("provider submission execution boundary", () => {
 		await findProviderReceipt({ runId: run!.id, jobId: successor!.id, providerFor });
 		expect(await AbuseRepository.getProviderRun(run!.id)).toMatchObject({ executionStatus: "completed", confirmationId: "58dd5e517c5fc535", finalUrl: "https://provider.example/reports" });
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "submitted" });
-		expect((await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.routeId, route.id), eq(abuseJobs.jobType, "poll_provider_correspondence"))).all()).toHaveLength(1);
+		expect((await getDb()).select().from(jobs).where(and(eq(jobs.routeId, route.id), eq(jobs.jobType, "poll_provider_correspondence"))).all()).toHaveLength(1);
 
 		// A settled route is not looked up again, and nothing was ever submitted twice.
 		await findProviderReceipt({ runId: run!.id, jobId: successor!.id, providerFor });
@@ -386,19 +386,19 @@ describe("provider submission execution boundary", () => {
 		const { route } = await createProviderRoute(provider);
 		await expect(executeProviderSubmission({ routeId: route.id, provider })).rejects.toBeInstanceOf(ProviderSubmissionUnknownExternalStateError);
 		const [run] = await AbuseRepository.listProviderRunsForReport(route.reportId);
-		const jobs = () => getDb().then((db) => db.select().from(abuseJobs).where(and(eq(abuseJobs.routeId, route.id), eq(abuseJobs.jobType, "find_provider_receipt"))).all());
-		const [job] = await jobs();
-		(await getDb()).update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, job!.id)).run();
+		const lookupJobs = () => getDb().then((db) => db.select().from(jobs).where(and(eq(jobs.routeId, route.id), eq(jobs.jobType, "find_provider_receipt"))).all());
+		const [job] = await lookupJobs();
+		(await getDb()).update(jobs).set({ status: "completed" }).where(eq(jobs.id, job!.id)).run();
 		// Two days after the submission the last lookup is past: the route stays for a person.
 		(await getDb()).update(abuseProviderRuns).set({ createdAt: new Date(Date.now() - 2 * 24 * 60 * 60_000) }).where(eq(abuseProviderRuns.id, run!.id)).run();
 		await findProviderReceipt({ runId: run!.id, jobId: job!.id, providerFor: () => provider });
-		expect((await jobs()).filter((queued) => queued.status === "queued")).toHaveLength(0);
+		expect((await lookupJobs()).filter((queued) => queued.status === "queued")).toHaveLength(0);
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "unknown_external_state" });
 
 		const blind = testProvider({ submit: async () => { throw new Error("socket hang up"); } });
 		const { route: blindRoute } = await createProviderRoute(blind);
 		await expect(executeProviderSubmission({ routeId: blindRoute.id, provider: blind })).rejects.toBeInstanceOf(ProviderSubmissionUnknownExternalStateError);
-		expect((await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.routeId, blindRoute.id), eq(abuseJobs.jobType, "find_provider_receipt"))).all()).toHaveLength(0);
+		expect((await getDb()).select().from(jobs).where(and(eq(jobs.routeId, blindRoute.id), eq(jobs.jobType, "find_provider_receipt"))).all()).toHaveLength(0);
 	});
 
 	test("fails closed when provider acceptance cannot be durably settled after the marker", async () => {

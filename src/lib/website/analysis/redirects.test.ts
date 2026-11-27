@@ -7,7 +7,9 @@ import { isKitSiblingSeed } from "../../abuse/origin/kit_job";
 import { ArtifactsEntity } from "../../db/entities/artifacts";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { createWebsiteSubmission, runDueWebsiteAutoRetries, websiteSubmissionDedupeKey } from "../../submissions/website";
+import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
+import { ensureWebsiteVisitJobs } from "../visit_queue/run";
+import { queuedVisits, runQueuedVisits } from "../visit_queue/test_helpers";
 import type { WebsiteArchiveResult } from "../archive/types";
 import { scriptedVisitSession } from "../../site_visit/test_helpers";
 import { analyzeWebsite } from "./ai";
@@ -17,7 +19,7 @@ import { chainSiteAssessments, websiteReportUrls } from "../info/report_hops";
 import type { WebsiteNavigationHop } from "../types";
 import { waitForStatus, websiteSubmission } from "../test_helpers";
 import { getDb } from "../../db";
-import { abuseJobs, abuseReports } from "../../abuse/schema";
+import { jobs, abuseReports } from "../../abuse/schema";
 import { REPORT_JOIN_WINDOW_MS } from "../../abuse/persistence/reports";
 import { eq } from "drizzle-orm";
 import { siteChecks, type SiteCheckState } from "../../liveness/schema";
@@ -247,15 +249,16 @@ describe("website redirects", () => {
 
 	test("a second site on a shared host opens its own case and is reported on its own", async () => {
 		const reported = "https://sites.google.com/view/start-trezor-suite";
-		const existingId = await createWebsiteSubmission({ url: reported }, async () => undefined);
+		const { id: existingId } = await createWebsiteSubmission({ url: reported });
 		await SubmissionsEntity.update(existingId, { status: "reported" });
 
 		const url = "https://sites.google.com/view/revert-change";
 		const page = "https://sites.google.com/view/revert-change/login";
-		const id = await createWebsiteSubmission({ url }, (options) => analyzeWebsite(options, dependencies(archiveOf([hop(0, url, 302, page), hop(1, page, 200)]))));
+		const { id } = await createWebsiteSubmission({ url });
+		await runQueuedVisits((options) => analyzeWebsite(options, dependencies(archiveOf([hop(0, url, 302, page), hop(1, page, 200)]))));
 		expect(id).not.toBe(existingId);
 		// The same site submitted again still lands on its own case.
-		expect(await createWebsiteSubmission({ url: "https://sites.google.com/view/Revert-Change/" }, async () => undefined)).toBe(id);
+		expect((await createWebsiteSubmission({ url: "https://sites.google.com/view/Revert-Change/" })).id).toBe(id);
 
 		const submission = await waitForStatus(id, ["reported", "failed", "invalid"]);
 		expect(submission.status).toBe("reported");
@@ -329,7 +332,7 @@ describe("one report per site across cases", () => {
 		const joined = (await AbuseRepository.listEvents(report!.id)).filter((event) => event.eventType === "report.case_joined");
 		expect(joined.map(({ data }) => data)).toEqual([{ submissionId: second.toString(), urls: [kitPage] }]);
 		// Its redirector is watched under the shared report: another lure of the same kit.
-		const watches = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "watch_redirector")).all();
+		const watches = (await getDb()).select().from(jobs).where(eq(jobs.jobType, "watch_redirector")).all();
 		expect(watches.map(({ reportId, dedupeKey }) => ({ reportId, dedupeKey }))).toEqual([
 			{ reportId: report!.id, dedupeKey: `watch-redirector:${lure(1)}` },
 			{ reportId: report!.id, dedupeKey: `watch-redirector:${lure(2)}` },
@@ -357,12 +360,12 @@ describe("one report per site across cases", () => {
 		await analyzeWebsite({ submissionId: second, url: lure(2) }, dependencies(archive));
 		expect((await AbuseRepository.listJoinedReportsForSubmission(second)).map(({ id }) => id)).toEqual([report.id]);
 
-		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "investigate_joined_case")).all();
-		expect(jobs.map(({ reportId, dedupeKey }) => ({ reportId, dedupeKey }))).toEqual([{ reportId: report.id, dedupeKey: `investigate-joined:${second.toString()}:${report.id.toString()}` }]);
+		const queuedJobs = (await getDb()).select().from(jobs).where(eq(jobs.jobType, "investigate_joined_case")).all();
+		expect(queuedJobs.map(({ reportId, dedupeKey }) => ({ reportId, dedupeKey }))).toEqual([{ reportId: report.id, dedupeKey: `investigate-joined:${second.toString()}:${report.id.toString()}` }]);
 		// The joined site is linked into its campaign by this case's own evidence, as a member through the joined report.
-		const links = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "link_campaign")).all();
+		const links = (await getDb()).select().from(jobs).where(eq(jobs.jobType, "link_campaign")).all();
 		expect(links.map(({ dedupeKey }) => dedupeKey)).toContain(`campaign-link:${second.toString()}:${report.id.toString()}`);
-		const payload = readInvestigationJobPayload(jobs[0]!.payload);
+		const payload = readInvestigationJobPayload(queuedJobs[0]!.payload);
 		expect(payload).toMatchObject({ submissionId: second.toString(), pageUrl: kitPage, finding: { finding: "phishing" } });
 		expect(payload.dataDrops?.map(({ kind, key }) => ({ kind, key }))).toEqual([{ kind: "telegram_bot", key: "telegram-token:8123456789:AAH-kit-token" }]);
 		const website = (await SubmissionsEntity.get(second))!.data;
@@ -397,7 +400,7 @@ describe("one report per site across cases", () => {
 
 		// A replayed analysis queues nothing twice.
 		await analyzeWebsite({ submissionId: second, url: lure(2) }, dependencies(archive));
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "investigate_joined_case")).all()).toHaveLength(1);
+		expect((await getDb()).select().from(jobs).where(eq(jobs.jobType, "investigate_joined_case")).all()).toHaveLength(1);
 	});
 
 	test("a joined case's evidence job that keeps failing says so on the case, and leaves the joined report alone", async () => {
@@ -407,8 +410,8 @@ describe("one report per site across cases", () => {
 		const second = await websiteSubmission(25n, lure(2));
 		await reachKit(second, lure(2));
 		const worker = new AbuseWorker({ owner: "joined-case-failure", investigateJoinedCase: async () => { throw new Error("lookup down"); } });
-		for (let attempt = 0; attempt < 20 && (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "investigate_joined_case")).get()?.status !== "failed"; attempt++) {
-			(await getDb()).update(abuseJobs).set({ nextAttemptAt: new Date(0) }).where(eq(abuseJobs.jobType, "investigate_joined_case")).run();
+		for (let attempt = 0; attempt < 20 && (await getDb()).select().from(jobs).where(eq(jobs.jobType, "investigate_joined_case")).get()?.status !== "failed"; attempt++) {
+			(await getDb()).update(jobs).set({ nextAttemptAt: new Date(0) }).where(eq(jobs.jobType, "investigate_joined_case")).run();
 			await worker.processOne({ jobTypes: ["investigate_joined_case"] });
 		}
 		const data = (await SubmissionsEntity.get(second))!.data;
@@ -558,7 +561,9 @@ describe("the sites of a chain", () => {
 
 test("a new website submission hands its options to the analysis it starts", async () => {
 	const started: unknown[] = [];
-	const id = await createWebsiteSubmission({ url: "https://fresh.example.com/" }, async (options) => started.push(options));
+	const { id, status } = await createWebsiteSubmission({ url: "https://fresh.example.com/" });
+	expect(status).toBe("queued");
+	await runQueuedVisits(async (options) => started.push(options));
 	expect(started).toEqual([{ submissionId: id, url: "https://fresh.example.com/" }]);
 });
 
@@ -758,9 +763,9 @@ describe("browser-service failures", () => {
 		// Not due yet: nothing is started.
 		const started: bigint[] = [];
 		const startAnalysis = async (options: { submissionId: bigint }) => { started.push(options.submissionId); };
-		expect(await runDueWebsiteAutoRetries({ now: new Date(dueAt.getTime() - 1_000), startAnalysis })).toBe(0);
+		expect(await runQueuedVisits(startAnalysis)).toEqual([]);
 		// Due: re-queued through the normal retry boundary.
-		expect(await runDueWebsiteAutoRetries({ now: dueAt, startAnalysis })).toBe(1);
+		expect(await runQueuedVisits(startAnalysis, { all: true })).toEqual([id]);
 		expect(started).toEqual([id]);
 		expect((await SubmissionsEntity.get(id))?.status).toBe("running");
 
@@ -775,12 +780,13 @@ describe("browser-service failures", () => {
 			expect(actualDelay).toBeGreaterThanOrEqual(expectedDelay - 5_000);
 			expect(actualDelay).toBeLessThanOrEqual(expectedDelay + 60_000);
 		}
-		await run();
+		// The last scheduled retry is the visit job's own, as the worker runs it.
+		await runQueuedVisits((options) => analyzeWebsite(options, failing), { all: true });
 		({ submission, autoRetry } = await autoRetryOf());
 		expect(submission.status).toBe("failed");
 		expect(submission.info).toBe(`The browser service failed (Unexpected server response: 503). It failed ${totalRetries + 1} times in a row; retry once it has recovered.`);
 		expect(autoRetry).toBeUndefined();
-		expect(await runDueWebsiteAutoRetries({ now: new Date(Date.now() + 48 * 60 * 60_000), startAnalysis })).toBe(0);
+		expect(await runQueuedVisits(startAnalysis, { all: true })).toEqual([]);
 	});
 
 	test("a due retry the retry boundary refuses, because the case was reported, is dropped instead of being refused on every pass", async () => {
@@ -795,12 +801,13 @@ describe("browser-service failures", () => {
 
 		const started: bigint[] = [];
 		const startAnalysis = async (options: { submissionId: bigint }) => { started.push(options.submissionId); };
-		expect(await runDueWebsiteAutoRetries({ now: dueAt, startAnalysis })).toBe(0);
+		await ensureWebsiteVisitJobs();
+		await runQueuedVisits(startAnalysis, { all: true });
 		expect(started).toEqual([]);
 		const after = await SubmissionsEntity.get(id);
 		expect(after?.status).toBe("failed");
 		expect(after?.data.kind === "website" ? after.data.website.autoRetry : "none").toBeUndefined();
-		expect(await SubmissionsEntity.listDueWebsiteAutoRetries(new Date(dueAt.getTime() + 60_000))).toEqual([]);
+		expect(await queuedVisits()).toEqual([]);
 	});
 
 	test("a site that blocks every egress is final: no backoff and no automatic retry", async () => {

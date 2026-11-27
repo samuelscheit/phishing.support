@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs, abuseReports, abuseTargets, type AbuseJob } from "../abuse/schema";
+import { jobs, abuseReports, abuseTargets, type Job } from "../abuse/schema";
 import { AbuseWorker } from "../abuse/worker";
 import { saveResolvedTarget } from "../abuse/worker/resolution";
 import { getDb } from "../db";
@@ -67,16 +67,16 @@ async function resolve(reportId: bigint, targetId: bigint, status: "resolved" | 
 	await saveResolvedTarget(reportId, targetId, { status, resolverSnapshot: { source: "liveness_test" }, routes: [] });
 }
 
-async function livenessJobs(targetId?: bigint): Promise<AbuseJob[]> {
+async function livenessJobs(targetId?: bigint): Promise<Job[]> {
 	const db = await getDb();
-	return db.select().from(abuseJobs)
-		.where(and(eq(abuseJobs.jobType, "check_site_liveness"), ...(targetId === undefined ? [] : [eq(abuseJobs.dedupeKey, livenessJobKey(targetId))])))
+	return db.select().from(jobs)
+		.where(and(eq(jobs.jobType, "check_site_liveness"), ...(targetId === undefined ? [] : [eq(jobs.dedupeKey, livenessJobKey(targetId))])))
 		.all();
 }
 
-async function complete(job: AbuseJob) {
+async function complete(job: Job) {
 	const db = await getDb();
-	db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, job.id)).run();
+	db.update(jobs).set({ status: "completed" }).where(eq(jobs.id, job.id)).run();
 }
 
 async function setReportedAt(reportId: bigint, createdAt: Date) {
@@ -206,7 +206,7 @@ describe("running the checks", () => {
 
 		// The chain broke: its job failed for good after a check at 6 h.
 		const db = await getDb();
-		db.update(abuseJobs).set({ status: "failed" }).where(eq(abuseJobs.id, job!.id)).run();
+		db.update(jobs).set({ status: "failed" }).where(eq(jobs.id, job!.id)).run();
 		await recordSiteCheck({ reportId, targetId }, {
 			url: "https://login.kit-example.com/verify",
 			state: "online",
@@ -237,7 +237,7 @@ describe("running the checks", () => {
 		const db = await getDb();
 		// The report is canceled, so the dispatched check ends without visiting the site.
 		db.update(abuseReports).set({ status: "canceled" }).where(eq(abuseReports.id, reportId)).run();
-		db.update(abuseJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) }).where(eq(abuseJobs.dedupeKey, livenessJobKey(targetId))).run();
+		db.update(jobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) }).where(eq(jobs.dedupeKey, livenessJobKey(targetId))).run();
 		const worker = new AbuseWorker();
 		expect(await worker.processOne({ jobTypes: ["check_site_liveness"] })).toBe(true);
 		expect((await livenessJobs(targetId))[0]).toMatchObject({ status: "completed" });

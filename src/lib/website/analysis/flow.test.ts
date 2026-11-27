@@ -14,7 +14,7 @@ import { analyzeWebsite } from "./ai";
 import type { WebsiteAnalysisDependencies } from "./analysis_types";
 import { buildWebsiteClassificationInput } from "./classification";
 import { getDb } from "../../db";
-import { abuseJobs, abuseArtifacts } from "../../abuse/schema";
+import { jobs, abuseArtifacts } from "../../abuse/schema";
 import { readInvestigationJobPayload } from "../../investigation/payload";
 import { scriptedVisitSession, type ScriptedVisit } from "../../site_visit/test_helpers";
 import { reporterBrowserIdentity } from "../../browser/reporter_identity";
@@ -22,6 +22,7 @@ import type { WebsiteNavigationHop } from "../types";
 import { eq } from "drizzle-orm";
 import { sha256Hex } from "../../util/hash";
 import { waitForStatus, websiteSubmission } from "../test_helpers";
+import { runQueuedVisits } from "../visit_queue/test_helpers";
 
 useTemporaryDatabase();
 
@@ -342,7 +343,7 @@ describe("a visit through a multi-page kit", () => {
 		expect(report!.description).toContain("Microsoft's official website is https://www.microsoft.com/; the reported site is not part of it.");
 		expect(report!.legalBrandUrl).toBe("https://www.microsoft.com/");
 		// The data drop is reported at its own host by the investigation, from the visit's own recording.
-		const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report!.id)).get()!;
+		const job = (await getDb()).select().from(jobs).where(eq(jobs.reportId, report!.id)).get()!;
 		expect(readInvestigationJobPayload(job.payload).dataDrops).toEqual([expect.objectContaining({ kind: "telegram_bot", key: "telegram-token:8123456789:AAH-kit-token", matchedCanaries: ["marker", "password"] })]);
 		const capture = (await getDb()).select().from(abuseArtifacts).where(eq(abuseArtifacts.reportId, report!.id)).all().find((artifact) => artifact.name === "exfiltration-network-capture.json");
 		expect(JSON.parse(Buffer.from(capture!.blob).toString("utf8"))).toMatchObject({ version: 2, pageUrl: SIGN_IN, backends: [expect.objectContaining({ kind: "telegram_bot" })] });
@@ -412,7 +413,8 @@ describe("a visit through a multi-page kit", () => {
 
 		// The retry visits the submitted URL live; the stored page of an unfinished visit is not reused.
 		const retried: Array<Parameters<typeof analyzeWebsite>[0]> = [];
-		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => { retried.push(options); } });
+		await retryWebsiteAnalysis(id);
+		await runQueuedVisits(async (options) => { retried.push(options); });
 		expect(retried).toEqual([expect.objectContaining({ url: CONSENT, mhtmlSnapshot: undefined, reuseEvidenceArtifacts: false })]);
 
 		await analyzeWebsite(retried[0]!, deps);
@@ -433,7 +435,8 @@ describe("a visit through a multi-page kit", () => {
 
 		// Anyone may have it analyzed again; the retry keeps the verdict it replaces.
 		const started: Array<Parameters<typeof analyzeWebsite>[0]> = [];
-		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => { started.push(options); } });
+		await retryWebsiteAnalysis(id);
+		await runQueuedVisits(async (options) => { started.push(options); });
 		expect(started).toEqual([expect.objectContaining({ url: CONSENT, mhtmlSnapshot: undefined })]);
 		expect(await SubmissionRetriesEntity.listForSubmission(id)).toEqual([expect.objectContaining({
 			submissionId: id,
@@ -473,7 +476,8 @@ describe("a visit through a multi-page kit", () => {
 		await SubmissionsEntity.update(id, { status: "failed" });
 
 		const started: Array<Parameters<typeof analyzeWebsite>[0]> = [];
-		await retryWebsiteAnalysis(id, { startAnalysis: async (options) => { started.push(options); } });
+		await retryWebsiteAnalysis(id);
+		await runQueuedVisits(async (options) => { started.push(options); });
 		expect(started).toHaveLength(1);
 		expect(started[0]!.archivedUrl).toBe(RECOVERY);
 		expect(started[0]!.mhtmlSnapshot?.toString("utf8")).toContain(`Snapshot-Content-Location: ${RECOVERY}`);
@@ -621,7 +625,7 @@ describe("a page whose Copy button hands out another command than it shows", () 
 		expect(report!.description).toContain("It shows \"brew install --cask levo\" so the visitor believes a legitimate install is running.");
 		expect(report!.description).toContain("It downloads and runs code from: https://hostsync.pro/hgp03m/LNcf8Kpm6qWr.");
 		// The investigation fetches the copied command's payload, as it does a shown command's.
-		const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report!.id)).get()!;
+		const job = (await getDb()).select().from(jobs).where(eq(jobs.reportId, report!.id)).get()!;
 		expect(readInvestigationJobPayload(job.payload).pasteCommands).toEqual([{ shown: copied, payloadUrls: ["https://hostsync.pro/hgp03m/LNcf8Kpm6qWr"], interpreters: ["curl", "osascript"] }]);
 
 		// The visit's evidence keeps what the page copied, in its chronology too.

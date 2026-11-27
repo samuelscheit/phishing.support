@@ -34,9 +34,10 @@ export async function POST(req: NextRequest) {
 		}
 
 		const reporter = await getReporterMetadata(req);
-		const stream_id = await createWebsiteSubmission({ url, ...(instructions ? { instructions } : {}), mhtmlSnapshot, rereport: rereport === true, ...reporter });
+		const submission = await createWebsiteSubmission({ url, ...(instructions ? { instructions } : {}), mhtmlSnapshot, rereport: rereport === true, ...reporter });
 
-		return NextResponse.json({ stream_id });
+		// The id is the case's live stream: its events start when the visit queue reaches it.
+		return NextResponse.json({ stream_id: submission.id.toString(), status: submission.status });
 	} catch (err) {
 		console.error("Submission error:", err);
 		return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

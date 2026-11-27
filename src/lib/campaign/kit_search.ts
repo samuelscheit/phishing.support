@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { SubmissionsEntity } from "../db/entities/submissions";
 import { AbuseRepository } from "../abuse/repository";
-import type { AbuseJob } from "../abuse/schema";
+import type { Job } from "../abuse/schema";
 import { throwIfAborted } from "../abuse/worker/shared";
 import { isKitSiblingSeed, retiredKitHashes } from "../abuse/origin/kit_job";
 import { isUrlscanBusy, urlscanRetryAfterMs } from "../abuse/origin/urlscan";
@@ -127,7 +127,7 @@ export type CampaignKitSearchDependencies = SiblingDiscoveryDependencies & {
  * report's sibling; the analysis alone decides whether it is reported and
  * joins the campaign.
  */
-export async function searchCampaignKits(params: { job: AbuseJob; signal?: AbortSignal }, dependencies: CampaignKitSearchDependencies = {}): Promise<void> {
+export async function searchCampaignKits(params: { job: Job; signal?: AbortSignal }, dependencies: CampaignKitSearchDependencies = {}): Promise<void> {
 	const { job, signal } = params;
 	const parsed = stateSchema.safeParse(job.payload);
 	if (!parsed.success || !job.reportId) throw new Error("Campaign kit search job has an invalid state.");

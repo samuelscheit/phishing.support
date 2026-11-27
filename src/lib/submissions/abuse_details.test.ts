@@ -8,7 +8,7 @@ import { AbuseRepository } from "../abuse/repository";
 import { reportConfirmedEmailPhishing, reportConfirmedWebsiteAbuse } from "../abuse/submission_reports";
 import { getSubmissionDetails } from "./details";
 import { getDb } from "../db";
-import { abuseJobs } from "../abuse/schema";
+import { jobs } from "../abuse/schema";
 import { reportExfiltrationBackend } from "../exfiltration/reporting";
 
 useTemporaryDatabase();
@@ -82,9 +82,9 @@ describe("submission report read model", () => {
 			reporter: {},
 			finding: { finding: "malware" },
 		});
-		const jobs = (await getDb()).select().from(abuseJobs).all();
-		expect(jobs.filter((job) => job.jobType === "resolve_report")).toEqual([]);
-		const investigations = jobs.filter((job) => job.jobType === "investigate_report");
+		const queuedJobs = (await getDb()).select().from(jobs).all();
+		expect(queuedJobs.filter((job) => job.jobType === "resolve_report")).toEqual([]);
+		const investigations = queuedJobs.filter((job) => job.jobType === "investigate_report");
 		expect(investigations).toHaveLength(2);
 		expect(investigations.find((job) => job.reportId === credential.report.reportId)).toMatchObject({
 			payload: { submissionId: "351387190816673788", pageUrl: "https://shop.example.com/", finding: { finding: "phishing", phishingBasis: "credential_theft" }, pasteCommands: [] },

@@ -6,7 +6,7 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs } from "../abuse/schema";
+import { jobs } from "../abuse/schema";
 import type { WebsiteKitResource } from "../website/types";
 import type { LinkDependencies } from "./link";
 import { linkJob, linkJobKey } from "./queue";
@@ -39,7 +39,7 @@ async function site(id: bigint, host: string, options: { status?: "reported" | "
 	return (await AbuseRepository.createReport({ request, reporter: {}, submissionId: id })).reportId;
 }
 
-const jobs = async (jobType: "link_campaign" | "describe_campaign" | "search_campaign_kits") => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, jobType)).all();
+const jobsOfType = async (jobType: "link_campaign" | "describe_campaign" | "search_campaign_kits") => (await getDb()).select().from(jobs).where(eq(jobs.jobType, jobType)).all();
 
 describe("the campaign sweep", () => {
 	test("queues one link job per confirmed site with a report, spaced apart, once per label", async () => {
@@ -50,14 +50,14 @@ describe("the campaign sweep", () => {
 		const now = new Date("2026-11-20T00:00:00Z");
 		expect(await enqueueCampaignSweep("rules-v1", now)).toBe(2);
 		expect(await enqueueCampaignSweep("rules-v1", now)).toBe(2);
-		const queued = await jobs("link_campaign");
+		const queued = await jobsOfType("link_campaign");
 		expect(queued.map(({ payload, nextAttemptAt }) => ({ payload, at: nextAttemptAt.toISOString() }))).toEqual([
 			{ payload: { submissionId: "1" }, at: "2026-11-20T00:00:00.000Z" },
 			{ payload: { submissionId: "2" }, at: "2026-11-20T00:00:20.000Z" },
 		]);
 		// Another label, such as an operator's sweep, queues them again.
 		await enqueueCampaignSweep("manual-2026-11-21", now);
-		expect(await jobs("link_campaign")).toHaveLength(4);
+		expect(await jobsOfType("link_campaign")).toHaveLength(4);
 	});
 
 	test("a rules sweep drops the jobs an older rules sweep still has waiting, never the ones that ran or a site's own link", async () => {
@@ -70,11 +70,11 @@ describe("the campaign sweep", () => {
 		await AbuseRepository.enqueueJob(linkJob(first));
 		// One job of the oldest sweep already ran.
 		const db = await getDb();
-		const [ran] = (await jobs("link_campaign")).filter((job) => job.dedupeKey === linkJobKey(first, `rules-v${CAMPAIGN_RULES_VERSION - 2}`));
-		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, ran!.id)).run();
+		const [ran] = (await jobsOfType("link_campaign")).filter((job) => job.dedupeKey === linkJobKey(first, `rules-v${CAMPAIGN_RULES_VERSION - 2}`));
+		db.update(jobs).set({ status: "completed" }).where(eq(jobs.id, ran!.id)).run();
 
 		expect(await enqueueRulesSweep()).toBe(2);
-		expect((await jobs("link_campaign")).map((job) => `${job.dedupeKey} ${job.status}`).sort()).toEqual([
+		expect((await jobsOfType("link_campaign")).map((job) => `${job.dedupeKey} ${job.status}`).sort()).toEqual([
 			`${linkJobKey(first)} queued`,
 			`${linkJobKey(first, "manual-2026-11-19")} queued`,
 			`${linkJobKey(second, "manual-2026-11-19")} queued`,
@@ -89,8 +89,8 @@ describe("the campaign sweep", () => {
 		const reportId = (await site(11n, "kit-sweep-test.com", { kitResources: [{ url: "https://kit-sweep-test.com/app.js", mimeType: "application/javascript", size: 40_000, sha256: KIT }] }))!;
 		const campaignId = await linkSiteToCampaign({ submissionId: 11n, reportId }, { ...linking, fetch: async () => { throw new Error("no urlscan call expected"); } });
 		expect(campaignId).toBe((await CampaignRepository.campaignForMember({ submissionId: 11n, reportId }))!);
-		expect((await jobs("describe_campaign")).map(({ payload }) => payload)).toEqual([{ campaignId: campaignId!.toString() }]);
-		expect((await jobs("search_campaign_kits")).map(({ payload }) => payload?.campaignId)).toEqual([campaignId!.toString()]);
+		expect((await jobsOfType("describe_campaign")).map(({ payload }) => payload)).toEqual([{ campaignId: campaignId!.toString() }]);
+		expect((await jobsOfType("search_campaign_kits")).map(({ payload }) => payload?.campaignId)).toEqual([campaignId!.toString()]);
 
 		// An old capture without files: urlscan answers garbage, the site is linked by what it has.
 		const oldReport = (await site(12n, "old-sweep-test.com"))!;
@@ -105,7 +105,7 @@ describe("the campaign sweep", () => {
 		expect(await linkSiteToCampaign({ submissionId: 13n, reportId: busyReport }, { ...linking, apiKey: "test", fetch: busy })).toBe((await CampaignRepository.campaignForMember({ submissionId: 13n, reportId: busyReport }))!);
 		const deferred = (await AbuseRepository.listEvents(busyReport)).find(({ eventType }) => eventType === "kit_backfill.checked")!.data;
 		expect(deferred).toMatchObject({ kind: "deferred" });
-		const retry = (await jobs("link_campaign")).find(({ dedupeKey }) => dedupeKey === linkJobKey({ submissionId: 13n, reportId: busyReport }, "backfill"))!;
+		const retry = (await jobsOfType("link_campaign")).find(({ dedupeKey }) => dedupeKey === linkJobKey({ submissionId: 13n, reportId: busyReport }, "backfill"))!;
 		expect(retry).toMatchObject({ payload: { submissionId: "13" }, reportId: busyReport });
 		expect(retry.nextAttemptAt.getTime() - before).toBeGreaterThanOrEqual(7_200_000);
 		// Nothing was concluded about urlscan's scans of the site.

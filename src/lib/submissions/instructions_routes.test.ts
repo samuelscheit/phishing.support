@@ -8,6 +8,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import type { ReporterInstructions } from "./instructions";
 import { createWebsiteSubmission, retryWebsiteAnalysis } from "./website";
 import type { AnalyzeWebsiteOptions } from "../website/analysis/ai";
+import { runQueuedVisits } from "../website/visit_queue/test_helpers";
 
 useTemporaryDatabase();
 
@@ -26,9 +27,11 @@ async function websiteCase(id: bigint, instructions?: ReporterInstructions) {
 	return id;
 }
 
-function recorder() {
+/** Runs the queued visits with a fake analysis that records what it was given. */
+async function visit() {
 	const started: AnalyzeWebsiteOptions[] = [];
-	return { started, startAnalysis: async (options: AnalyzeWebsiteOptions) => { started.push(options); } };
+	await runQueuedVisits(async (options) => { started.push(options); });
+	return started;
 }
 
 const stored = async (id: bigint) => {
@@ -47,15 +50,15 @@ describe("submitting a website with instructions", () => {
 	});
 
 	test("stores trimmed instructions with the case and hands them to the analysis", async () => {
-		const { started, startAnalysis } = recorder();
-		const id = await createWebsiteSubmission({ url: URL, instructions: { browser: "Click 'Download PDF'.", analysis: "It impersonates Example Bank." } }, startAnalysis);
+		const { id } = await createWebsiteSubmission({ url: URL, instructions: { browser: "Click 'Download PDF'.", analysis: "It impersonates Example Bank." } });
+		const started = await visit();
 		expect(await stored(id)).toEqual({ browser: "Click 'Download PDF'.", analysis: "It impersonates Example Bank." });
 		expect(started[0]!.instructions).toEqual({ browser: "Click 'Download PDF'.", analysis: "It impersonates Example Bank." });
 	});
 
 	test("a case without instructions stores none", async () => {
-		const { started, startAnalysis } = recorder();
-		const id = await createWebsiteSubmission({ url: "https://other.example/" }, startAnalysis);
+		const { id } = await createWebsiteSubmission({ url: "https://other.example/" });
+		const started = await visit();
 		const submission = await SubmissionsEntity.get(id);
 		expect(submission?.data).toEqual({ kind: "website", website: { url: "https://other.example/" } });
 		expect(started[0]!.instructions).toBeUndefined();
@@ -65,32 +68,32 @@ describe("submitting a website with instructions", () => {
 describe("analyzing a website case again", () => {
 	test("keeps the stored instructions when the retry brings none", async () => {
 		const id = await websiteCase(11n, { browser: "Open the menu.", analysis: "Fake bank." });
-		const { started, startAnalysis } = recorder();
-		await retryWebsiteAnalysis(id, { startAnalysis });
+		await retryWebsiteAnalysis(id);
+		const started = await visit();
 		expect(started[0]!.instructions).toEqual({ browser: "Open the menu.", analysis: "Fake bank." });
 		expect(await stored(id)).toEqual({ browser: "Open the menu.", analysis: "Fake bank." });
 	});
 
 	test("replaces the stored instructions with the retry's", async () => {
 		const id = await websiteCase(12n, { browser: "Open the menu.", analysis: "Fake bank." });
-		const { started, startAnalysis } = recorder();
-		await retryWebsiteAnalysis(id, { startAnalysis, instructions: { analysis: "Fake insurer." } });
+		await retryWebsiteAnalysis(id, { instructions: { analysis: "Fake insurer." } });
+		const started = await visit();
 		expect(started[0]!.instructions).toEqual({ analysis: "Fake insurer." });
 		expect(await stored(id)).toEqual({ analysis: "Fake insurer." });
 	});
 
 	test("clears the stored instructions when the retry's are empty", async () => {
 		const id = await websiteCase(13n, { browser: "Open the menu." });
-		const { started, startAnalysis } = recorder();
-		await retryWebsiteAnalysis(id, { startAnalysis, instructions: undefined });
+		await retryWebsiteAnalysis(id, { instructions: undefined });
+		const started = await visit();
 		expect(started[0]!.instructions).toBeUndefined();
 		expect(await stored(id)).toBeUndefined();
 	});
 
 	test("a case that never had instructions gets the retry's", async () => {
 		const id = await websiteCase(14n);
-		const { started, startAnalysis } = recorder();
-		await retryWebsiteAnalysis(id, { startAnalysis, instructions: { browser: "Accept the cookies first." } });
+		await retryWebsiteAnalysis(id, { instructions: { browser: "Accept the cookies first." } });
+		const started = await visit();
 		expect(started[0]!.instructions).toEqual({ browser: "Accept the cookies first." });
 		expect(await stored(id)).toEqual({ browser: "Accept the cookies first." });
 	});

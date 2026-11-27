@@ -13,7 +13,7 @@ import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
 import type { resolveIpTarget } from "../resolver/ip";
 import { contactRoute } from "../resolver/routes";
-import { abuseJobs, type AbuseJob } from "../schema";
+import { jobs, type Job } from "../schema";
 import { sha256Hex } from "@/lib/util/hash";
 
 /** Helpers of the host-move tests: the site as checks see it, the new host's resolution, a recording mail relay, and the reports. */
@@ -79,20 +79,20 @@ export function recordingSend(options: { refuse?: string } = {}) {
 	return { sent, send };
 }
 
-export async function jobs(type: AbuseJob["jobType"]): Promise<AbuseJob[]> {
-	return (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, type)).all().sort((a, b) => a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime());
+export async function jobsOfType(type: Job["jobType"]): Promise<Job[]> {
+	return (await getDb()).select().from(jobs).where(eq(jobs.jobType, type)).all().sort((a, b) => a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime());
 }
 
 /** Run the target's pending check as the worker does: the job completes once it queued its successor. */
 export async function check(targetId: bigint, dependencies: SiteCheckDependencies & HostMoveDependencies): Promise<void> {
-	const [job] = (await jobs("check_site_liveness")).filter((candidate) => candidate.status === "queued" && candidate.dedupeKey === livenessJobKey(targetId));
+	const [job] = (await jobsOfType("check_site_liveness")).filter((candidate) => candidate.status === "queued" && candidate.dedupeKey === livenessJobKey(targetId));
 	await runLivenessCheck({ jobId: job!.id, targetId, dependencies });
-	(await getDb()).update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, job!.id)).run();
+	(await getDb()).update(jobs).set({ status: "completed" }).where(eq(jobs.id, job!.id)).run();
 }
 
 /** When the target's next check is due. */
 export async function nextCheckAt(targetId: bigint): Promise<Date[]> {
-	return (await jobs("check_site_liveness")).filter((candidate) => candidate.status === "queued" && candidate.dedupeKey === livenessJobKey(targetId)).map((candidate) => candidate.nextAttemptAt);
+	return (await jobsOfType("check_site_liveness")).filter((candidate) => candidate.status === "queued" && candidate.dedupeKey === livenessJobKey(targetId)).map((candidate) => candidate.nextAttemptAt);
 }
 
 export async function events(reportId: bigint, type: string) {
@@ -116,7 +116,7 @@ export async function reportedAt(ip: string, asn: number, holder: string) {
 	const request = await validateAbuseReportRequest({ targets: [domain], observedUrls: [{ target: domain, urls: [`https://${domain}/`] }], allegationCategory: "malware", description: `Malware distribution at https://${domain}/.` });
 	const { reportId } = await AbuseRepository.createReport({ request, reporter: {} });
 	const [target] = await AbuseRepository.listTargets(reportId);
-	(await getDb()).delete(abuseJobs).where(eq(abuseJobs.reportId, reportId)).run();
+	(await getDb()).delete(jobs).where(eq(jobs.reportId, reportId)).run();
 	await AbuseRepository.setTargetResolution({ targetId: target!.id, status: "resolved", resolverSnapshot: { target: domain, infrastructure: { ipResolutions: [{ ip, status: "resolved", resolverSnapshot: { bgpOrigin: { asns: [asn] }, asnRdap: [{ asn, organization: { organization: holder } }] } }] } } });
 	await scheduleLivenessChecks(target!.id);
 	return { reportId, targetId: target!.id, domain };

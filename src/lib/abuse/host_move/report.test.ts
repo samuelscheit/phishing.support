@@ -12,12 +12,12 @@ import { nextStep, rankedRoutes, takedownSummary } from "@/lib/submissions/repor
 import { trylevoAt } from "@/lib/submissions/trylevo_reports.fixtures";
 import { TRYLEVO_MAIL } from "../mail/trylevo_mail.fixtures";
 import { AbuseRepository } from "../repository";
-import { abuseArtifacts, abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
+import { abuseArtifacts, jobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports } from "../schema";
 import { getProviderSubmissionProvider } from "../providers";
 import { recheckAfterProviderAction } from "../worker/provider_action";
 import { sha256Hex } from "@/lib/util/hash";
 import { reportHostMove } from "./report";
-import { CASE, check, DEMO_JS, events, jobs, LETS_ENCRYPT, nextCheckAt, recordingSend, reportedAt, resolving, routeOf, site, trylevo } from "./report.fixtures";
+import { CASE, check, DEMO_JS, events, jobsOfType, LETS_ENCRYPT, nextCheckAt, recordingSend, reportedAt, resolving, routeOf, site, trylevo } from "./report.fixtures";
 
 useTemporaryDatabase();
 
@@ -38,7 +38,7 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 			content: "served",
 			evidence: { url: "https://trylevo.app/", state: "online", httpStatus: 200, server: "nginx/1.30.0", certificate: LETS_ENCRYPT, kitFiles: [{ url: "https://trylevo.app/js/demo.js", sha256: sha256Hex(DEMO_JS) }] },
 		} });
-		const [action] = await jobs("report_host_move");
+		const [action] = await jobsOfType("report_host_move");
 		expect(action).toMatchObject({ reportId, status: "queued", payload: { key: (moved!.data as { key: string }).key } });
 		// The next check comes an hour after the move, not at the 6-hour offset.
 		expect(await nextCheckAt(targetId)).toEqual([trylevoAt("22:30:05")]);
@@ -98,7 +98,7 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 		expect(sent).toHaveLength(2);
 		expect(await events(reportId, HOST_MOVED_EVENT)).toHaveLength(1);
 		expect(await events(reportId, HOST_MOVE_ACTION_EVENT)).toHaveLength(3);
-		expect(await jobs("report_host_move")).toHaveLength(1);
+		expect(await jobsOfType("report_host_move")).toHaveLength(1);
 		// Back on the report's schedule: the 6-hour check.
 		expect(await nextCheckAt(targetId)).toEqual([new Date(trylevoAt("00:50:04").getTime() + 24 * 3_600_000)]);
 
@@ -138,7 +138,7 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 		(await getDb()).update(abuseMailMessages).set({ occurredAt: trylevoAt("21:10:00"), status: "sent" }).where(eq(abuseMailMessages.messageId, "<op@phishing.support>")).run();
 
 		await check(targetId, site(["85.137.52.128"], trylevoAt("21:30:05")));
-		const [action] = await jobs("report_host_move");
+		const [action] = await jobsOfType("report_host_move");
 		const { sent, send } = recordingSend();
 		await reportHostMove({ reportId, key: String(action!.payload!.key) }, { resolveIp: resolving("abuse-ams@v-sys.org", 43641).resolveIp, send });
 		expect(sent.map(({ recipient }) => recipient)).toEqual(["abuse-ams@v-sys.org"]);
@@ -153,7 +153,7 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 		const now = Date.now();
 		db.update(abuseReports).set({ createdAt: new Date(now - 2 * 3_600_000) }).where(eq(abuseReports.id, reportId)).run();
 		await recordSiteCheck({ reportId, targetId }, { url: "https://trylevo.app/", state: "online", resolvedAddresses: ["188.114.96.2"], domainStatuses: [], checkedAt: new Date(now - 60_000) });
-		db.update(abuseJobs).set({ nextAttemptAt: new Date(now + 4 * 3_600_000) }).where(eq(abuseJobs.dedupeKey, livenessJobKey(targetId))).run();
+		db.update(jobs).set({ nextAttemptAt: new Date(now + 4 * 3_600_000) }).where(eq(jobs.dedupeKey, livenessJobKey(targetId))).run();
 		const restricted = { direction: "inbound" as const, correlationKey: "provider-api:cloudflare:2f28c335", subject: "[983629f3ca31bae5]: Response to your Phishing report", textBody: TRYLEVO_MAIL.cloudflareRestricted, occurredAt: new Date(now - 50 * 60_000) };
 
 		// A receipt is no action.
@@ -172,7 +172,7 @@ describe("trylevo.app leaves Cloudflare after Cloudflare restricted it (case 384
 		await scheduleLivenessChecks(origin.id);
 		await check(origin.id, site(["85.137.52.128"], trylevoAt("21:30:05")));
 		expect(await events(reportId, HOST_MOVED_EVENT)).toEqual([]);
-		expect(await jobs("report_host_move")).toEqual([]);
+		expect(await jobsOfType("report_host_move")).toEqual([]);
 	});
 });
 
@@ -184,20 +184,20 @@ describe("other moves", () => {
 		expect(moved!.data).toMatchObject({ kind: "new_network", from: { name: "Hetzner Online GmbH", asn: 213230 }, to: { name: "Sollutium-NL", asn: 43641 }, content: "served" });
 
 		const { sent, send } = recordingSend();
-		const [action] = await jobs("report_host_move");
+		const [action] = await jobsOfType("report_host_move");
 		await reportHostMove({ reportId, key: String(action!.payload!.key) }, { resolveIp: resolving("abuse-ams@v-sys.org", 43641).resolveIp, send });
 		expect(sent).toEqual([]);
 		const [route] = await AbuseRepository.listRoutes(reportId);
 		expect(route).toMatchObject({ targetId, routeKey: "email:abuse-ams@v-sys.org", routeType: "email", verifiedEmail: "abuse-ams@v-sys.org", status: "verified", resolverProvenance: { source: "domain_infrastructure_ip", originatingDomain: domain, originatingIp: "85.137.52.128" } });
 		const [evidence] = await AbuseRepository.listRouteArtifacts(route!.id, ["host_move_evidence"]);
 		expect(evidence!.blob.toString()).toStartWith(`Hosting change of ${domain}\nObserved: 2026-11-27T08:00:00.000Z\nFrom: 5.161.1.1, AS213230 (Hetzner Online GmbH)\nTo: 85.137.52.128, AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.)`);
-		expect((await jobs("send_email")).map((candidate) => ({ routeId: candidate.routeId, dedupeKey: candidate.dedupeKey }))).toEqual([{ routeId: route!.id, dedupeKey: `email:${route!.id}` }]);
+		expect((await jobsOfType("send_email")).map((candidate) => ({ routeId: candidate.routeId, dedupeKey: candidate.dedupeKey }))).toEqual([{ routeId: route!.id, dedupeKey: `email:${route!.id}` }]);
 		expect((await events(reportId, HOST_MOVE_ACTION_EVENT)).map((event) => event.data)).toEqual([{ key: action!.payload!.key, role: "host", action: "reported", to: "abuse-ams@v-sys.org" }]);
 
 		// A retried job finds the route, its evidence and its delivery as they are.
 		await reportHostMove({ reportId, key: String(action!.payload!.key) }, { resolveIp: resolving("abuse-ams@v-sys.org", 43641).resolveIp, send });
 		expect(await AbuseRepository.listRoutes(reportId)).toHaveLength(1);
-		expect(await jobs("send_email")).toHaveLength(1);
+		expect(await jobsOfType("send_email")).toHaveLength(1);
 		expect(await events(reportId, HOST_MOVE_ACTION_EVENT)).toHaveLength(1);
 	});
 
@@ -221,7 +221,7 @@ describe("other moves", () => {
 				filed.push({ confirmationId: answer.confirmationId, body: answer.body, attachments: answer.attachments.map((file) => file.filename) });
 			} } },
 		}) as typeof getProviderSubmissionProvider;
-		const [action] = await jobs("report_host_move");
+		const [action] = await jobsOfType("report_host_move");
 		await reportHostMove({ reportId, key: String(action!.payload!.key) }, { resolveIp: resolving("abuse-ams@v-sys.org", 43641).resolveIp, send: recordingSend().send, providerFor });
 		await reportHostMove({ reportId, key: String(action!.payload!.key) }, { resolveIp: resolving("abuse-ams@v-sys.org", 43641).resolveIp, send: recordingSend().send, providerFor });
 
@@ -231,7 +231,7 @@ describe("other moves", () => {
 		expect(filed[0]!.body).toStartWith(`Hello Eranet Trust & Safety,\n\nFurther to our report of the malware distribution site ${domain}: the domain is still in use. ${domain} has moved: as of 27 Nov 2026 08:00 UTC it resolves to 85.137.52.128, in AS43641 (Sollutium-NL SOLLUTIUM EU Sp z.o.o.), and that server serves the reported site; on `);
 		expect(filed[0]!.body).toContain("it still resolved to 5.161.1.1, in AS213230 (Hetzner Online GmbH).");
 		expect(filed[0]!.body).toContain(`Please suspend the domain ${domain}.`);
-		expect((await jobs("poll_provider_correspondence")).map((job) => job.routeId)).toEqual([routeId]);
+		expect((await jobsOfType("poll_provider_correspondence")).map((job) => job.routeId)).toEqual([routeId]);
 		expect((await events(reportId, HOST_MOVE_ACTION_EVENT)).filter((event) => event.routeId === routeId).map((event) => (event.data as { action: string }).action)).toEqual(["rechecked", "followed_up"]);
 	});
 
@@ -241,7 +241,7 @@ describe("other moves", () => {
 		const [moved] = await events(reportId, HOST_MOVED_EVENT);
 		expect(moved!.data).toMatchObject({ kind: "new_cdn", to: { name: "Fastly", cdn: "Fastly", asn: 54113 }, content: "served", evidence: { server: "Varnish" } });
 		expect((moved!.data as { evidence: Record<string, unknown> }).evidence.certificate).toBeUndefined();
-		const [action] = await jobs("report_host_move");
+		const [action] = await jobsOfType("report_host_move");
 		await reportHostMove({ reportId, key: String(action!.payload!.key) }, { resolveIp: resolving("abuse@fastly.com", 54113).resolveIp, send: recordingSend().send });
 		expect((await AbuseRepository.listRoutes(reportId)).map((route) => route.verifiedEmail)).toEqual(["abuse@fastly.com"]);
 	});
@@ -250,7 +250,7 @@ describe("other moves", () => {
 		const { reportId, targetId } = await trylevo();
 		await check(targetId, site(["188.114.96.3", "104.21.32.1"], trylevoAt("19:50:04")));
 		expect(await events(reportId, HOST_MOVED_EVENT)).toEqual([]);
-		expect(await jobs("report_host_move")).toEqual([]);
+		expect(await jobsOfType("report_host_move")).toEqual([]);
 		expect(await nextCheckAt(targetId)).toEqual([new Date(trylevoAt("00:50:04").getTime() + 24 * 3_600_000)]);
 	});
 
@@ -258,7 +258,7 @@ describe("other moves", () => {
 		const { reportId, targetId } = await trylevo();
 		await check(targetId, site(["85.137.52.128"], trylevoAt("21:30:05"), { script: 404 }));
 		expect((await events(reportId, HOST_MOVED_EVENT)).map((event) => (event.data as { content: string }).content)).toEqual(["gone"]);
-		expect(await jobs("report_host_move")).toEqual([]);
+		expect(await jobsOfType("report_host_move")).toEqual([]);
 		const [siteReport] = await getReportsForSubmission(CASE);
 		expect(takedownSummary([siteReport!]).moved).toBeUndefined();
 		expect(rankedRoutes([siteReport!]).find(({ route }) => route.organisation === "Cloudflare")!.standing.bucket).toBe("action_taken");
@@ -273,6 +273,6 @@ describe("other moves", () => {
 		expect(recorded.map((event) => (event.data as { content: string }).content)).toEqual(["gone", "served"]);
 		expect(new Set(recorded.map((event) => (event.data as { key: string }).key)).size).toBe(1);
 		expect(hostMovesOf(recorded)).toHaveLength(1);
-		expect(await jobs("report_host_move")).toHaveLength(1);
+		expect(await jobsOfType("report_host_move")).toHaveLength(1);
 	});
 });

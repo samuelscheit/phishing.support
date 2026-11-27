@@ -8,7 +8,7 @@ import { useTemporaryDatabase } from "../../db/test_helpers";
 import { createAbuseEmailDraft } from "../mail/draft";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
-import { abuseArtifacts, abuseJobs } from "../schema";
+import { abuseArtifacts, jobs } from "../schema";
 import { readOriginHostSnapshot, type KitCollectedData } from "./snapshot";
 import { reportOriginHost, type OriginHostReportDependencies } from "./report";
 import { sha256Hex } from "../../util/hash";
@@ -162,7 +162,7 @@ describe("origin-host report workflow", () => {
 			}),
 			createSiblingSubmission: async (options: { url: string; source?: string }) => {
 				siblingOptions.push(options);
-				return 410000000000000002n;
+				return { id: 410000000000000002n, status: "queued" as const };
 			},
 			kitFacts: async () => ({
 				abuse: "credential_theft" as const,
@@ -177,7 +177,7 @@ describe("origin-host report workflow", () => {
 		};
 
 		// Slice 1 sweeps 8.8.8.0-2 and hands its progress to a successor job.
-		const queuedJob = async () => (await (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.jobType, "report_origin_host"), eq(abuseJobs.status, "queued"))).all());
+		const queuedJob = async () => (await (await getDb()).select().from(jobs).where(and(eq(jobs.jobType, "report_origin_host"), eq(jobs.status, "queued"))).all());
 		await reportOriginHost({ reportId: report.id, messageId: stored!.id }, dependencies);
 		expect(sweptSlices).toEqual([["8.8.8.0", "8.8.8.1", "8.8.8.2"]]);
 		expect(verificationTargets).toEqual([[{ path: "/kit.css?v=1", sha256: capturedCssSha256 }]]);
@@ -266,7 +266,7 @@ Phishing Support
 support@phishing.support
 https://phishing.support`);
 
-		const sendJobs = await (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.jobType, "send_email"), eq(abuseJobs.routeId, originRoute.id))).all();
+		const sendJobs = await (await getDb()).select().from(jobs).where(and(eq(jobs.jobType, "send_email"), eq(jobs.routeId, originRoute.id))).all();
 		expect(sendJobs).toHaveLength(1);
 		await reportOriginHost({ reportId: report.id, messageId: stored!.id }, {
 			resolveNetworks: async () => { throw new Error("must not rescan"); },
@@ -277,7 +277,7 @@ https://phishing.support`);
 		expect((await AbuseRepository.listTargets(report.id)).filter(({ normalizedTarget }) => normalizedTarget === "8.8.8.6")).toHaveLength(1);
 		expect((await AbuseRepository.listRoutes(report.id)).filter(({ routeKey }) => routeKey === "origin-host:abuse@host.example")).toHaveLength(1);
 		expect(await AbuseRepository.listRouteArtifacts(originRoute.id, ["origin_host_evidence"])).toHaveLength(1);
-		expect(await (await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.jobType, "send_email"), eq(abuseJobs.routeId, originRoute.id))).all()).toHaveLength(1);
+		expect(await (await getDb()).select().from(jobs).where(and(eq(jobs.jobType, "send_email"), eq(jobs.routeId, originRoute.id))).all()).toHaveLength(1);
 		expect(await (await getDb()).select().from(abuseArtifacts).where(eq(abuseArtifacts.routeId, originRoute.id)).all()).toHaveLength(1);
 	});
 
@@ -299,8 +299,8 @@ https://phishing.support`);
 		const snapshot = readOriginHostSnapshot(route.resolutionSnapshot)!;
 		expect(snapshot.servers).toEqual([]);
 		expect(snapshot.historicalResolutions.map(({ ip }) => ip)).toEqual(["8.8.8.1"]);
-		const jobs = await (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all();
-		expect(jobs.map(({ jobType }) => jobType)).toEqual(["submit_provider"]);
+		const queuedJobs = await (await getDb()).select().from(jobs).where(eq(jobs.routeId, route.id)).all();
+		expect(queuedJobs.map(({ jobType }) => jobType)).toEqual(["submit_provider"]);
 
 		const report = await digitalOceanReport(route.id);
 		expect(report).toMatchObject({ sourceIp: null, campaignTarget: "google.com", evidenceUrl: "https://trk.example.run/gg/fkd" });
@@ -331,7 +331,7 @@ https://phishing.support`);
 		expect(history.calls).toEqual(["login.kit-host.com"]);
 		// Only addresses inside the host's networks are checked; Cloudflare's and a stranger's are not this host's.
 		expect(checked).toEqual([["8.8.8.6", "2a03:b0c0:2:d0::5"]]);
-		expect(await (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "report_origin_host")).all()).toEqual([]);
+		expect(await (await getDb()).select().from(jobs).where(eq(jobs.jobType, "report_origin_host")).all()).toEqual([]);
 		const route = (await disclosure.originRoute())!;
 		const snapshot = readOriginHostSnapshot(route.resolutionSnapshot)!;
 		expect(snapshot.servers).toEqual([{ ip: "8.8.8.6", asn: 64500, prefix: "8.8.8.0/29", certificate, discovery: "dns_history" }]);

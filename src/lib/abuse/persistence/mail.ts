@@ -4,8 +4,9 @@ import { serviceIdentity } from "../../network/service_identity";
 import { getDb, type Transaction } from "../../db";
 import { generateId } from "../../db/ids";
 import { abuseCaseTag, subjectRepeats } from "../mail/correlation";
-import { abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseMailClassification, type AbuseProviderRoute } from "../schema";
+import { jobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns, abuseReports, type AbuseMailClassification, type AbuseProviderRoute } from "../schema";
 import { registrableDomain } from "../security/security";
+import { insertQueuedJob } from "./jobs";
 import { insertArtifact, now, recordEvent } from "./shared";
 
 class DuplicateInboundMailError extends Error {
@@ -27,36 +28,12 @@ function ensureInboundReplyClassificationInTransaction(tx: Transaction, message:
 	if (message.direction !== "inbound") return;
 	const dedupeKey = `classify-abuse-mail:${message.id.toString()}`;
 	const existing = tx
-		.select({ id: abuseJobs.id })
-		.from(abuseJobs)
-		.where(eq(abuseJobs.dedupeKey, dedupeKey))
+		.select({ id: jobs.id })
+		.from(jobs)
+		.where(eq(jobs.dedupeKey, dedupeKey))
 		.get();
 	if (existing) return;
-	const id = generateId();
-	const timestamp = now();
-	tx.insert(abuseJobs)
-		.values({
-			id,
-			jobType: "classify_provider_reply",
-			reportId: message.reportId,
-			routeId: message.routeId,
-			payload: { messageId: message.id.toString() },
-			dedupeKey,
-			status: "queued",
-			retryCount: 0,
-			nextAttemptAt: timestamp,
-			unknownExternalState: false,
-			createdAt: timestamp,
-			updatedAt: timestamp,
-		})
-		.run();
-	recordEvent(tx, {
-		reportId: message.reportId,
-		routeId: message.routeId,
-		jobId: id,
-		eventType: "job.queued",
-		data: { jobType: "classify_provider_reply" },
-	});
+	insertQueuedJob(tx, { jobType: "classify_provider_reply", reportId: message.reportId, routeId: message.routeId, payload: { messageId: message.id.toString() }, dedupeKey });
 }
 
 /** Ensure a recovered/duplicate inbound message has its durable classifier job. */

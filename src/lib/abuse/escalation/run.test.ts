@@ -8,7 +8,7 @@ import { approveDraftedMail } from "../approval/drafted_mail";
 import { approvalDraftOf } from "../persistence/approvals";
 import { AbuseRepository } from "../repository";
 import { routeContact } from "../resolver/contact_chain";
-import { abuseEvents, abuseJobs, abuseMailMessages, type AbuseProviderRoute } from "../schema";
+import { abuseEvents, jobs, abuseMailMessages, type AbuseProviderRoute } from "../schema";
 import type { sendAbuseEmailRoute } from "../mail/send";
 import { ESCALATION_EVENT, ESCALATION_HELD_EVENT, escalationJobKey, type EscalationDependencies } from "./run";
 import { day, DOMAIN, relay, reported, SENT, site, URL_, work } from "./run.fixtures";
@@ -23,7 +23,7 @@ afterAll(() => {
 });
 
 const steps = async (reportId: bigint) => (await AbuseRepository.listEvents(reportId)).filter((event) => event.eventType === ESCALATION_EVENT).map((event) => `${(event.data as { step: string }).step}${event.routeId ? `@${event.routeId}` : ""}:${(event.data as { action: string }).action}`);
-const queued = async (targetId: bigint) => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, escalationJobKey(targetId))).all().filter((job) => job.status === "queued").map((job) => job.nextAttemptAt);
+const queued = async (targetId: bigint) => (await getDb()).select().from(jobs).where(eq(jobs.dedupeKey, escalationJobKey(targetId))).all().filter((job) => job.status === "queued").map((job) => job.nextAttemptAt);
 const routes = async (reportId: bigint): Promise<AbuseProviderRoute[]> => AbuseRepository.listRoutes(reportId);
 
 describe("escalating a report nobody acts on", () => {
@@ -64,7 +64,7 @@ describe("escalating a report nobody acts on", () => {
 		expect(routeContact(parent.resolverProvenance)).toMatchObject({ reason: "escalation_no_action", escalation: { level: 2, fromRouteId: host.toString(), fromProvider: "Example Hosting B.V.", fromEmail: "abuse@hosting.example", reportedAt: SENT.toISOString() } });
 		// The new report keeps the transit provider as its fallback.
 		expect((parent.resolverProvenance.fallbackContacts as Array<{ email: string }>).map((contact) => contact.email)).toEqual(["noc@transit.example"]);
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, parent.id)).all().map((job) => job.jobType)).toContain("send_email");
+		expect((await getDb()).select().from(jobs).where(eq(jobs.routeId, parent.id)).all().map((job) => job.jobType)).toContain("send_email");
 
 		// Day 5: the upstream transit provider, as a report that names its customer.
 		await work(targetId, dependencies(day(5)));

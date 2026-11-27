@@ -10,7 +10,7 @@ import { templatePage } from "../../website/test_mhtml";
 import { validateAbuseReportRequest } from "../contracts";
 import type { sendAbuseEmailRoute } from "../mail/send";
 import { AbuseRepository } from "../repository";
-import { abuseEvents, abuseJobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns } from "../schema";
+import { abuseEvents, jobs, abuseMailMessages, abuseProviderRoutes, abuseProviderRuns } from "../schema";
 import { escalationJobKey, runEscalation, type EscalationDependencies } from "./run";
 
 /** Helpers of the escalation tests: a reported PayPal phishing site nobody acts on, the site as checks see it, a recording mail relay, and the worker. */
@@ -66,7 +66,7 @@ export async function reported() {
 	await ArtifactsEntity.saveBuffer({ submissionId, name: "chain-hop-0.html", kind: "website_hop_body", buffer: Buffer.from(KIT("at-report")) });
 	const request = await validateAbuseReportRequest({ targets: [DOMAIN], allegationCategory: "phishing", description: "PayPal credential phishing.", legalBrandUrl: "https://www.paypal.com/", observedUrls: [{ target: DOMAIN, urls: [URL_] }] });
 	const { reportId } = await AbuseRepository.createReport({ request, submissionId, reporter: {} });
-	db.delete(abuseJobs).where(eq(abuseJobs.reportId, reportId)).run();
+	db.delete(jobs).where(eq(jobs.reportId, reportId)).run();
 	const [target] = await AbuseRepository.listTargets(reportId);
 	await AbuseRepository.setTargetResolution({ targetId: target!.id, status: "resolved", resolverSnapshot: {} });
 	const route = (params: { key: string; name: string; type: "email" | "provider_submission"; email?: string; provenance: Record<string, unknown> }) => {
@@ -93,13 +93,13 @@ export async function reported() {
 /** Run the target's escalation as the worker does: its queued job, if any, runs and is completed. */
 export async function work(targetId: bigint, dependencies: EscalationDependencies): Promise<void> {
 	const db = await getDb();
-	const job = db.select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, escalationJobKey(targetId))).all().find((candidate) => candidate.status === "queued");
-	if (job) db.update(abuseJobs).set({ status: "running" }).where(eq(abuseJobs.id, job.id)).run();
+	const job = db.select().from(jobs).where(eq(jobs.dedupeKey, escalationJobKey(targetId))).all().find((candidate) => candidate.status === "queued");
+	if (job) db.update(jobs).set({ status: "running" }).where(eq(jobs.id, job.id)).run();
 	try {
 		await runEscalation({ targetId, ...(job ? { jobId: job.id } : {}) }, dependencies);
-		if (job) db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, job.id)).run();
+		if (job) db.update(jobs).set({ status: "completed" }).where(eq(jobs.id, job.id)).run();
 	} catch (error) {
-		if (job) db.update(abuseJobs).set({ status: "failed" }).where(eq(abuseJobs.id, job.id)).run();
+		if (job) db.update(jobs).set({ status: "failed" }).where(eq(jobs.id, job.id)).run();
 		throw error;
 	}
 }

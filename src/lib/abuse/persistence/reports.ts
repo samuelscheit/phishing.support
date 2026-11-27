@@ -5,7 +5,7 @@ import { generateId } from "../../db/ids";
 import type { ReporterMetadata } from "../../http/reporter_headers";
 import type { ValidatedAbuseReportRequest } from "../contracts";
 import {
-	abuseJobs,
+	jobs,
 	abuseProviderRoutes,
 	abuseProviderRuns,
 	abuseReportCases,
@@ -17,6 +17,7 @@ import {
 } from "../schema";
 import { AbuseInputError, createIdempotentTrackingToken, createTrackingToken, hashTrackingToken } from "../security/security";
 import { listArtifacts } from "./artifacts";
+import { insertQueuedJob } from "./jobs";
 import { insertArtifact, now, recordEvent } from "./shared";
 import { stableJson } from "../../util/hash";
 import { siteChecks, TAKEN_DOWN_STATES } from "../../liveness/schema";
@@ -248,24 +249,9 @@ export async function createReport(params: {
 			});
 			if (params.campaignId !== undefined) return { reportId, trackingToken, created: true };
 
-			const jobId = generateId();
-			const firstJob = params.investigation
-				? { jobType: "investigate_report" as const, payload: params.investigation.payload, dedupeKey: `investigate:${reportId.toString()}` }
-				: { jobType: "resolve_report" as const, payload: {}, dedupeKey: `resolve:${reportId.toString()}` };
-			tx.insert(abuseJobs)
-				.values({
-					id: jobId,
-					reportId,
-					...firstJob,
-					status: "queued",
-					retryCount: 0,
-					nextAttemptAt: timestamp,
-					unknownExternalState: false,
-					createdAt: timestamp,
-					updatedAt: timestamp,
-				})
-				.run();
-			recordEvent(tx, { reportId, jobId, eventType: "job.queued", data: { jobType: firstJob.jobType } });
+			insertQueuedJob(tx, params.investigation
+				? { jobType: "investigate_report", reportId, payload: params.investigation.payload, dedupeKey: `investigate:${reportId.toString()}` }
+				: { jobType: "resolve_report", reportId, dedupeKey: `resolve:${reportId.toString()}` });
 
 			return { reportId, trackingToken, created: true };
 		},
@@ -317,20 +303,7 @@ export async function releaseInvestigatedReport(params: {
 					metadata: { source: "investigation", decodedMimeType: evidence.mimeType, ...evidence.metadata },
 				});
 			}
-			const jobId = generateId();
-			tx.insert(abuseJobs).values({
-				id: jobId,
-				jobType: "resolve_report",
-				reportId: params.reportId,
-				payload: {},
-				dedupeKey: `resolve:${params.reportId.toString()}`,
-				status: "queued",
-				retryCount: 0,
-				nextAttemptAt: timestamp,
-				unknownExternalState: false,
-				createdAt: timestamp,
-				updatedAt: timestamp,
-			}).run();
+			const { id: jobId } = insertQueuedJob(tx, { jobType: "resolve_report", reportId: params.reportId, dedupeKey: `resolve:${params.reportId.toString()}` });
 			recordEvent(tx, {
 				reportId: params.reportId,
 				jobId,

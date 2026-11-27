@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 import { getDb } from "../../db";
 import { useTemporaryDatabase } from "../../db/test_helpers";
-import { abuseJobs } from "../schema";
+import { jobs } from "../schema";
 import { buildExfiltrationBackendRequest } from "../../exfiltration/reporting";
 import { stableJson } from "../../util/hash";
 import { validateAbuseReportRequest } from "../contracts";
@@ -143,9 +143,9 @@ describe("requeueing a generic provider-form route the agent stopped without sub
 		expect(await AbuseRepository.getRoute(route.id)).toMatchObject({ status: "escalating_to_portal" });
 		expect((await requeueEvents(reportId)).map((event) => event.data)).toEqual([{ from: "needs_human", to: "escalating_to_portal", reason: "operator_requeue_generic_portal", providerLink: ENTRY_URL }]);
 
-		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, reportId)).all();
-		expect(jobs.filter((job) => job.jobType === "run_portal")).toHaveLength(1);
-		expect(jobs.find((job) => job.jobType === "run_portal")).toMatchObject({ status: "queued", routeId: route.id, dedupeKey: `generic-portal:${route.id.toString()}`, payload: { providerLink: ENTRY_URL, requeuedFromRunId: run.id.toString() } });
+		const queuedJobs = (await getDb()).select().from(jobs).where(eq(jobs.reportId, reportId)).all();
+		expect(queuedJobs.filter((job) => job.jobType === "run_portal")).toHaveLength(1);
+		expect(queuedJobs.find((job) => job.jobType === "run_portal")).toMatchObject({ status: "queued", routeId: route.id, dedupeKey: `generic-portal:${route.id.toString()}`, payload: { providerLink: ENTRY_URL, requeuedFromRunId: run.id.toString() } });
 
 		// The backend's report now carries the confirmed page's screenshot, as new ones do from the start.
 		const evidence = await AbuseRepository.listArtifacts(reportId, ["user_evidence_original"]);

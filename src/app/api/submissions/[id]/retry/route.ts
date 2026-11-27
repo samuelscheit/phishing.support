@@ -39,11 +39,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 		const submission = await SubmissionsEntity.get(submissionId);
 		if (submission?.kind === "website") {
 			await retryWebsiteAnalysis(submissionId, parsed ? { instructions: parsed.instructions } : {});
-		} else if (parsed) {
-			return NextResponse.json({ error: "Instructions apply only to website submissions" }, { status: 400 });
-		} else {
-			await retryEmailAnalysis(submissionId);
+			// The visit waits its turn in the visit queue.
+			return NextResponse.json({ ok: true, status: "queued" });
 		}
+		if (parsed) return NextResponse.json({ error: "Instructions apply only to website submissions" }, { status: 400 });
+		await retryEmailAnalysis(submissionId);
 		return NextResponse.json({ ok: true, status: "running" });
 	} catch (error) {
 		if (error instanceof SubmissionRetryError) return NextResponse.json({ error: error.message }, { status: 409 });

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import sharp from "sharp";
 
 import type { AnalysisClient } from "../../analysis/run";
-import { abuseJobs } from "../../abuse/schema";
+import { jobs } from "../../abuse/schema";
 import { AbuseRepository } from "../../abuse/repository";
 import { IPHONE_USER_AGENT } from "../../browser/page";
 import { getDb } from "../../db";
@@ -169,7 +169,7 @@ describe("a mobile-only drive-by exploit kit (production case 377486973465530391
 		const evidence = (await AbuseRepository.getReportInput(report!.id))!.evidenceArtifacts.map(({ name }) => name);
 		expect(evidence).toEqual(["website-step2.png", "website.png", `hidden-frame-${"c".repeat(16)}.json`]);
 
-		const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report!.id)).get()!;
+		const job = (await getDb()).select().from(jobs).where(eq(jobs.reportId, report!.id)).get()!;
 		expect(readInvestigationJobPayload(job.payload)).toMatchObject({
 			finding: { finding: "malware" },
 			pasteCommands: [],

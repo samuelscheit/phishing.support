@@ -5,7 +5,7 @@ import type { JobGiveUp } from "../persistence/provider_runs";
 import { browserTaskModel, type ChatModel } from "../../browser/task/agent";
 import type { FabricCdpSessionAcquirer } from "../../browser/task/fabric";
 import { fabricBrowserSessionIdFromProviderPayload } from "../../browser/fabric_session";
-import type { AbuseJob } from "../schema";
+import type { Job } from "../schema";
 import { ensureRelayRefusalResends } from "./email";
 import { ensureCorrespondencePolls } from "./correspondence";
 import { ensureReceiptLookups } from "./receipt";
@@ -23,6 +23,7 @@ import { ensureLivenessChecks } from "../../liveness/schedule";
 import { sleep } from "../../util/sleep";
 import { isExternalJob, JOB_HANDLERS, JOB_LANES, JOB_POLICY, jobTimeoutMs, laneFilter, type JobLane } from "./jobs";
 import { JOB_WAIT_LIMIT_MS, jobWaitOf, MAX_RETRIES, retryDelayMs } from "./retry";
+import { ensureWebsiteVisitJobs } from "../../website/visit_queue/run";
 
 const RETRY_EXHAUSTED: JobGiveUp = { routeStatus: "failed", reason: "retry_exhausted" };
 
@@ -30,6 +31,8 @@ const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_POLL_MS = 1_500;
 const DEFAULT_CONTROL_CONCURRENCY = 2;
 const DEFAULT_EXTERNAL_CONCURRENCY = 2;
+/** Website visits at once: each holds a browser, and the browser relay has room for a few. */
+const DEFAULT_VISIT_CONCURRENCY = 4;
 const MAX_LANE_CONCURRENCY = 16;
 const DEFAULT_CONTROL_JOB_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_EXTERNAL_JOB_TIMEOUT_MS = 10 * 60_000;
@@ -40,7 +43,7 @@ const MAX_JOB_TIMEOUT_MS = 60 * 60_000;
 class JobExecutionTimeoutError extends Error {
 	readonly code = "ABUSE_JOB_TIMEOUT";
 
-	constructor(readonly job: AbuseJob, readonly timeoutMs: number) {
+	constructor(readonly job: Job, readonly timeoutMs: number) {
 		super(`Abuse job ${job.id.toString()} (${job.jobType}) exceeded its ${timeoutMs} ms execution deadline.`);
 		this.name = "JobExecutionTimeoutError";
 	}
@@ -78,6 +81,8 @@ export type AbuseWorkerOptions = {
 	controlConcurrency?: number;
 	/** Number of provider/browser jobs that may run at once. */
 	externalConcurrency?: number;
+	/** Number of website visits that may run at once; `WEBSITE_VISIT_CONCURRENCY` by default. */
+	visitConcurrency?: number;
 	/** Override the control-lane execution deadline (primarily for tests). */
 	controlJobTimeoutMs?: number;
 	/** Override the provider-lane execution deadline (primarily for tests). */
@@ -85,7 +90,7 @@ export type AbuseWorkerOptions = {
 	/** Override the origin-sweep execution deadline (primarily for tests). */
 	sweepJobTimeoutMs?: number;
 	/** Deterministic test hook; production always dispatches through the provider registry. */
-	processJob?: (job: AbuseJob, signal?: AbortSignal) => Promise<void>;
+	processJob?: (job: Job, signal?: AbortSignal) => Promise<void>;
 	/** Test hook: the model that drives browser tasks (production uses the app's OpenAI model). */
 	browserTaskModel?: () => ChatModel;
 	/** Test hook: the browser a browser task runs on (production leases a Fabric browser). */
@@ -108,6 +113,7 @@ export class AbuseWorker {
 	private readonly pollMs: number;
 	private readonly controlConcurrency: number;
 	private readonly externalConcurrency: number;
+	private readonly visitConcurrency: number;
 	private readonly controlJobTimeoutMs: number;
 	private readonly externalJobTimeoutMs: number;
 	private readonly sweepJobTimeoutMs: number;
@@ -127,6 +133,7 @@ export class AbuseWorker {
 		this.pollMs = options.pollMs ?? DEFAULT_POLL_MS;
 		this.controlConcurrency = boundedConcurrency(options.controlConcurrency ?? DEFAULT_CONTROL_CONCURRENCY, DEFAULT_CONTROL_CONCURRENCY);
 		this.externalConcurrency = boundedConcurrency(options.externalConcurrency ?? DEFAULT_EXTERNAL_CONCURRENCY, DEFAULT_EXTERNAL_CONCURRENCY);
+		this.visitConcurrency = boundedConcurrency(options.visitConcurrency ?? (Number.parseInt(process.env.WEBSITE_VISIT_CONCURRENCY ?? "", 10) || DEFAULT_VISIT_CONCURRENCY), DEFAULT_VISIT_CONCURRENCY);
 		this.controlJobTimeoutMs = boundedTimeout(options.controlJobTimeoutMs ?? DEFAULT_CONTROL_JOB_TIMEOUT_MS, DEFAULT_CONTROL_JOB_TIMEOUT_MS);
 		this.externalJobTimeoutMs = boundedTimeout(options.externalJobTimeoutMs ?? DEFAULT_EXTERNAL_JOB_TIMEOUT_MS, DEFAULT_EXTERNAL_JOB_TIMEOUT_MS);
 		this.sweepJobTimeoutMs = boundedTimeout(options.sweepJobTimeoutMs ?? DEFAULT_SWEEP_JOB_TIMEOUT_MS, DEFAULT_SWEEP_JOB_TIMEOUT_MS);
@@ -161,13 +168,15 @@ export class AbuseWorker {
 		await ensureOriginHostDisclosureJobs();
 		await ensureLivenessChecks();
 		await ensureRelayRefusalResends();
+		// Website cases waiting for a visit get their job: the queue resumes after a restart.
+		await ensureWebsiteVisitJobs();
 		// Every confirmed site is linked again once whenever the campaign rules change.
 		await enqueueRulesSweep();
 		// Provider/browser work gets its own lane. A stuck CAPTCHA or browser can
 		// therefore never consume the capacity reserved for resolution,
 		// reconciliation, and inbound correspondence jobs.
-		const slots: Record<JobLane, number> = { control: this.controlConcurrency, external: this.externalConcurrency, sweep: 1, link: 1, discovery: 1, liveness: 1 };
-		this.loopPromises = JOB_LANES.flatMap((lane) => Array.from({ length: slots[lane] }, () => this.runLoop(laneFilter(lane))));
+		const slots: Record<JobLane, number> = { control: this.controlConcurrency, external: this.externalConcurrency, sweep: 1, link: 1, discovery: 1, liveness: 1, visit: this.visitConcurrency };
+		this.loopPromises = JOB_LANES.flatMap((lane) => Array.from({ length: slots[lane] }, () => this.runLoop(laneFilter(lane, slots[lane]))));
 		this.stopSamplePurge = startSamplePurgeSchedule();
 	}
 
@@ -215,7 +224,7 @@ export class AbuseWorker {
 	}
 
 	/** A job's error decides its fate: fenced or left for recovery when interrupted, else failed for good or queued again. */
-	private async settleFailedJob(job: AbuseJob, error: unknown): Promise<void> {
+	private async settleFailedJob(job: Job, error: unknown): Promise<void> {
 		if (error instanceof WorkerStoppingError) return this.handleInterruptedJob(job, error.message, "worker_stopping");
 		if (error instanceof JobExecutionTimeoutError) return this.handleInterruptedJob(job, error.message, "job_execution_timeout", true);
 		const message = boundedErrorText(error);
@@ -245,7 +254,7 @@ export class AbuseWorker {
 	 * process-level rejection. A timed-out operation is fenced below according
 	 * to its durable external-boundary state.
 	 */
-	private async runJobWithDeadline(job: AbuseJob, controller: AbortController, timeoutMs: number): Promise<void> {
+	private async runJobWithDeadline(job: Job, controller: AbortController, timeoutMs: number): Promise<void> {
 		const operation = this.processJobOverride
 			? this.processJobOverride(job, controller.signal)
 			: this.processJob(job, controller.signal);
@@ -273,7 +282,7 @@ export class AbuseWorker {
 	}
 
 	private async handleInterruptedJob(
-		job: AbuseJob,
+		job: Job,
 		message: string,
 		reason: "job_execution_timeout" | "worker_stopping",
 		retryUnfenced = false,
@@ -320,7 +329,7 @@ export class AbuseWorker {
 		}
 	}
 
-	private async failRetryExhaustedJob(job: AbuseJob, error: string, giveUp: JobGiveUp = RETRY_EXHAUSTED): Promise<void> {
+	private async failRetryExhaustedJob(job: Job, error: string, giveUp: JobGiveUp = RETRY_EXHAUSTED): Promise<void> {
 		if (JOB_POLICY[job.jobType].supplementary) {
 			// Evidence gathering, infrastructure, campaigns, kit discovery and site checks are supplementary:
 			// their failure must not turn a successfully submitted phishing report into a reporting failure.
@@ -365,7 +374,7 @@ export class AbuseWorker {
 		}
 	}
 
-	private async processJob(job: AbuseJob, signal?: AbortSignal): Promise<void> {
+	private async processJob(job: Job, signal?: AbortSignal): Promise<void> {
 		await JOB_HANDLERS[job.jobType](job, {
 			...(signal ? { signal } : {}),
 			services: this.servicesFor(signal),

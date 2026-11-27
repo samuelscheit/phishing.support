@@ -2,7 +2,7 @@ import { AbuseRepository } from "@/lib/abuse/repository";
 import { AnalysisRunsEntity } from "@/lib/db/entities/analysis_runs";
 import { SubmissionRetriesEntity } from "@/lib/db/entities/submission_retries";
 import { SubmissionsEntity } from "@/lib/db/entities/submissions";
-import type { Submission, SubmissionKind, SubmissionRetryTrigger } from "@/lib/db/schema";
+import type { Submission, SubmissionKind, SubmissionRetryTrigger, SubmissionStatus } from "@/lib/db/schema";
 import { formatUtcDateTime } from "@/lib/util/date_time";
 
 /** A user-facing validation error for a retry that cannot safely be queued. */
@@ -58,11 +58,16 @@ export const MANUAL_RETRY_COOLDOWN_MS = 10 * 60_000;
 
 /**
  * The one place a retry takes a case: it moves the case from the status it
- * was validated at to running and records the retry, manual or automatic,
- * with what the case stood at. A request that lost the race to another
- * retry, or a manual one within the cooldown, is refused and records nothing.
+ * was validated at to `to` (running, or queued for a website visit that
+ * waits its turn) and records the retry, manual or automatic, with what the
+ * case stood at. A request that lost the race to another retry, or a manual
+ * one within the cooldown, is refused and records nothing.
  */
-export async function claimRetry(submission: Pick<Submission, "id" | "status">, trigger: SubmissionRetryTrigger, now = new Date()): Promise<void> {
+export async function claimRetry(
+	submission: Pick<Submission, "id" | "status">,
+	trigger: SubmissionRetryTrigger,
+	{ to = "running", now = new Date() }: { to?: Extract<SubmissionStatus, "running" | "queued">; now?: Date } = {},
+): Promise<void> {
 	if (trigger === "manual") {
 		const { lastAt } = await SubmissionRetriesEntity.summaryForSubmission(submission.id);
 		const allowedAt = lastAt ? lastAt.getTime() + MANUAL_RETRY_COOLDOWN_MS : 0;
@@ -70,6 +75,6 @@ export async function claimRetry(submission: Pick<Submission, "id" | "status">, 
 			throw new SubmissionRetryError(`This case was analyzed again moments ago; it can be analyzed again from ${formatUtcDateTime(new Date(allowedAt))}.`);
 		}
 	}
-	const claimed = await SubmissionRetriesEntity.claim({ submissionId: submission.id, from: submission.status, trigger });
+	const claimed = await SubmissionRetriesEntity.claim({ submissionId: submission.id, from: submission.status, to, trigger });
 	if (!claimed) throw new SubmissionRetryError("This submission is already being retried.");
 }

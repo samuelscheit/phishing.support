@@ -8,7 +8,7 @@ import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { sendAbuseEmailRoute } from "../abuse/mail/send";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs } from "../abuse/schema";
+import { jobs } from "../abuse/schema";
 import { ingestFetchedMail, type MailIngestConfig } from "./ingest";
 import type { FetchedMail } from "./rfc";
 import { inboundMail, noIntake } from "./test_helpers";
@@ -122,8 +122,8 @@ describe("mailbox ingest", () => {
 		expect(stored?.attachmentArtifactIds).toHaveLength(1);
 		expect((await AbuseRepository.getArtifact(sent.report.reportId, stored!.rawArtifactId!))?.blob.equals(source)).toBeTrue();
 		expect((await AbuseRepository.getArtifact(sent.report.reportId, BigInt(stored!.attachmentArtifactIds[0]!)))?.blob.toString()).toBe("Ticket #123");
-		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.dedupeKey, `classify-abuse-mail:${result.messageId.toString()}`)).all();
-		expect(jobs).toMatchObject([{ jobType: "classify_provider_reply", status: "queued", routeId: sent.route.id }]);
+		const queuedJobs = (await getDb()).select().from(jobs).where(eq(jobs.dedupeKey, `classify-abuse-mail:${result.messageId.toString()}`)).all();
+		expect(queuedJobs).toMatchObject([{ jobType: "classify_provider_reply", status: "queued", routeId: sent.route.id }]);
 		expect(await MailIngestEntity.get({ ...config, uid: 44 })).toMatchObject({ route: "reply", terminal: true });
 	});
 

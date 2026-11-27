@@ -6,6 +6,7 @@ import type { WebsiteSiteAssessment } from "../../website/types";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
 import { analyzeKitSibling, isKitSiblingSeed } from "./kit_job";
+import { runQueuedVisits } from "../../website/visit_queue/test_helpers";
 
 const CREDENTIAL_KIT: WebsiteSiteAssessment[] = [{ hopIndex: 0, finding: "phishing", phishingBasis: "credential_theft", evidenceQuote: "Sign in" }];
 
@@ -64,18 +65,14 @@ describe("kit sibling jobs", () => {
 
 	test("runs a sibling's analysis to completion inside its job, as a case that never seeds a search", async () => {
 		const report = await websiteCase(420000000000000011n, "kit.example.com", { siteAssessments: CREDENTIAL_KIT });
-		let finished = false;
 		const started: Array<{ url: string; submissionId: bigint }> = [];
-		const submissionId = await analyzeKitSibling({ reportId: report.reportId, url: "https://one.example.net/login" }, {
-			analyzeWebsite: async (options) => {
-				started.push({ url: options.url, submissionId: options.submissionId });
-				await Bun.sleep(20);
-				finished = true;
-				return options.submissionId;
-			},
+		const submissionId = await analyzeKitSibling({ reportId: report.reportId, url: "https://one.example.net/login" });
+		// Creating the case starts nothing; the visit queue runs it.
+		expect(started).toEqual([]);
+		await runQueuedVisits(async (options) => {
+			started.push({ url: options.url, submissionId: options.submissionId });
+			return options.submissionId;
 		});
-		// The job does not return until the analysis it started has finished.
-		expect(finished).toBe(true);
 		expect(started).toEqual([{ url: "https://one.example.net/login", submissionId: submissionId! }]);
 		const created = (await SubmissionsEntity.get(submissionId!))!;
 		expect(created.source).toBe(`kit-sibling:420000000000000011:${report.reportId.toString()}`);

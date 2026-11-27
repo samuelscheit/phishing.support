@@ -9,7 +9,7 @@ import type { ExfiltrationBackend } from "../../exfiltration/types";
 import { runReportInvestigation, type InvestigationDependencies } from "../../investigation/run";
 import { extractPasteCommands } from "../../malware/paste_commands";
 import { readInvestigationJobPayload } from "../../investigation/payload";
-import { abuseArtifacts, abuseJobs } from "../schema";
+import { abuseArtifacts, jobs } from "../schema";
 import { AbuseRepository } from "../repository";
 import { AbuseWorker } from "./";
 import { IPHONE_USER_AGENT } from "../../browser/page";
@@ -43,12 +43,12 @@ async function confirmedCase(id: bigint, finding: Parameters<typeof reportConfir
 		pasteCommands: finding.finding === "malware" ? extractPasteCommands(PANEO_COMMAND) : [],
 		screenshots: [{ filename: "website.png", png: SCREENSHOT }],
 	});
-	const job = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.reportId, report.reportId)).get()!;
+	const job = (await getDb()).select().from(jobs).where(eq(jobs.reportId, report.reportId)).get()!;
 	return { report, job };
 }
 
 function jobsOf(reportId: bigint) {
-	return getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.reportId, reportId)).all());
+	return getDb().then((db) => db.select().from(jobs).where(eq(jobs.reportId, reportId)).all());
 }
 
 /** Investigation dependencies that never touch the network; uploads are recorded. */
@@ -199,7 +199,7 @@ describe("pre-report investigation", () => {
 		const { report, job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
 		const { deps } = offline({ reportRedirector: async () => { throw new Error("Expected 101 status code"); } });
 		await workerWith(deps, "investigation-infra").processOne({ jobTypes: ["investigate_report"] });
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({ status: "queued", retryCount: 1 });
+		expect((await getDb()).select().from(jobs).where(eq(jobs.id, job.id)).get()).toMatchObject({ status: "queued", retryCount: 1 });
 		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("investigating");
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "queued", lastError: "Expected 101 status code" } } });
 	});
@@ -207,10 +207,10 @@ describe("pre-report investigation", () => {
 	test("retry exhaustion releases the report without evidence instead of holding it forever", async () => {
 		const submissionId = 507n;
 		const { report, job } = await confirmedCase(submissionId, { finding: "phishing", phishingBasis: "credential_theft" }, "https://phish.example.com/");
-		(await getDb()).update(abuseJobs).set({ retryCount: 8 }).where(eq(abuseJobs.id, job.id)).run();
+		(await getDb()).update(jobs).set({ retryCount: 8 }).where(eq(jobs.id, job.id)).run();
 		const { deps } = offline({ reportRedirector: async () => { throw new Error("browser unavailable"); } });
 		await workerWith(deps, "investigation-exhausted-retries").processOne({ jobTypes: ["investigate_report"] });
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()).toMatchObject({ status: "failed", lastError: "browser unavailable" });
+		expect((await getDb()).select().from(jobs).where(eq(jobs.id, job.id)).get()).toMatchObject({ status: "failed", lastError: "browser unavailable" });
 		expect((await AbuseRepository.getReport(report.reportId))?.status).toBe("accepted");
 		expect((await jobsOf(report.reportId)).map((item) => item.jobType).sort()).toEqual(["investigate_report", "resolve_report"]);
 		expect((await SubmissionsEntity.get(submissionId))?.data).toMatchObject({ website: { investigation: { status: "failed", lastError: "browser unavailable" } } });
@@ -224,7 +224,7 @@ describe("pre-report investigation", () => {
 		const worker = new AbuseWorker({ owner: "investigation-long", externalJobTimeoutMs: 1_000, investigateReport: (params) => runReportInvestigation(params, deps) });
 		await worker.processOne({ jobTypes: ["investigate_report"] });
 		expect(finished).toBeTrue();
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.id, job.id)).get()?.status).toBe("completed");
+		expect((await getDb()).select().from(jobs).where(eq(jobs.id, job.id)).get()?.status).toBe("completed");
 	}, 20_000);
 });
 

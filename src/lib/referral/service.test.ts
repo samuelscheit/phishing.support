@@ -9,7 +9,7 @@ import { validateAbuseReportRequest } from "../abuse/contracts";
 import { sendAbuseEmailRoute } from "../abuse/mail/send";
 import { abuseCaseTag } from "../abuse/mail/correlation";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs } from "../abuse/schema";
+import { jobs } from "../abuse/schema";
 import { sendEmail } from "../abuse/worker/email";
 import { classifyReply } from "../abuse/worker/mail";
 import type { CampaignMember } from "../campaign/members";
@@ -117,7 +117,7 @@ async function campaignOf(submissionId: bigint): Promise<bigint> {
 
 async function sendJobs(routeId: bigint) {
 	const db = await getDb();
-	return db.select().from(abuseJobs).where(and(eq(abuseJobs.routeId, routeId), eq(abuseJobs.jobType, "send_email"))).all();
+	return db.select().from(jobs).where(and(eq(jobs.routeId, routeId), eq(jobs.jobType, "send_email"))).all();
 }
 
 /** Run the approved mail through the real worker and MIME boundary; return what went over SMTP. */
@@ -354,8 +354,8 @@ describe("criminal referral of a campaign", () => {
 		expect((await AbuseRepository.listEvents(route.reportId)).some((event) => event.eventType === "referral.reply_received")).toBe(true);
 		// No provider workflow (portal escalation, follow-up) is ever queued for an authority's answer.
 		const db = await getDb();
-		const jobs = db.select().from(abuseJobs).where(eq(abuseJobs.routeId, route.id)).all();
-		expect(jobs.map((job): string => job.jobType).sort()).toEqual(["classify_provider_reply", "monitor_provider_reply", "send_email"]);
+		const queuedJobs = db.select().from(jobs).where(eq(jobs.routeId, route.id)).all();
+		expect(queuedJobs.map((job): string => job.jobType).sort()).toEqual(["classify_provider_reply", "monitor_provider_reply", "send_email"]);
 	});
 
 	test("a supplement carries only the sites the authority has not received, under its file number", async () => {

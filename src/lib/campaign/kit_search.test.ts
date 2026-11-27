@@ -6,10 +6,11 @@ import { SubmissionsEntity } from "../db/entities/submissions";
 import { useTemporaryDatabase } from "../db/test_helpers";
 import { validateAbuseReportRequest } from "../abuse/contracts";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs, type AbuseJob } from "../abuse/schema";
+import { jobs, type Job } from "../abuse/schema";
 import type { WebsiteKitResource, WebsiteSiteAssessment } from "../website/types";
 import { analyzeKitSibling } from "../abuse/origin/kit_job";
 import { websiteSubmissionDedupeKey } from "../submissions/website";
+import { runQueuedVisits } from "../website/visit_queue/test_helpers";
 import { armCampaignKitSearch, searchableKitFingerprints, searchCampaignKits } from "./kit_search";
 import { linkSiteMember, type LinkDependencies } from "./link";
 import { CampaignRepository } from "./repository";
@@ -67,10 +68,10 @@ function urlscan(domainsByHash: Record<string, string[]>) {
 /** No candidate is a top-ranked site; the real Tranco list is never downloaded in a test. */
 const noPopularSites = async () => new Set<string>();
 
-const searchJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "search_campaign_kits")).all();
-const queuedSearch = async (): Promise<AbuseJob> => (await searchJobs()).find((job) => job.status === "queued")!;
-const finish = async (job: AbuseJob) => (await getDb()).update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.id, job.id)).run();
-const analysisJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "analyze_kit_sibling")).all();
+const searchJobs = async () => (await getDb()).select().from(jobs).where(eq(jobs.jobType, "search_campaign_kits")).all();
+const queuedSearch = async (): Promise<Job> => (await searchJobs()).find((job) => job.status === "queued")!;
+const finish = async (job: Job) => (await getDb()).update(jobs).set({ status: "completed" }).where(eq(jobs.id, job.id)).run();
+const analysisJobs = async () => (await getDb()).select().from(jobs).where(eq(jobs.jobType, "analyze_kit_sibling")).all();
 const searchEvents = async (reportId: bigint) => (await AbuseRepository.listEvents(reportId)).filter(({ eventType }) => eventType === "kit_siblings.discovered").map(({ data }) => data);
 
 describe("a campaign's kit search", () => {
@@ -172,11 +173,13 @@ describe("a campaign's kit search", () => {
 
 		// A site queued before the file was retired is not opened, and the case records why.
 		let opened = false;
-		const skipped = await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT] }, { analyzeWebsite: async () => { opened = true; return 1n; } });
+		const skipped = await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT] });
+		await runQueuedVisits(async () => { opened = true; return 1n; });
 		expect({ skipped, opened }).toEqual({ skipped: undefined, opened: false });
 		expect((await AbuseRepository.listEvents(original.reportId)).filter(({ eventType }) => eventType === "kit_siblings.skipped").map(({ data }) => data)).toEqual([{ url: "https://queued-retire-test.net/", retiredHashes: [KIT] }]);
 		// Found through another, live file too, it is opened.
-		await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT, SHARED] }, { analyzeWebsite: async () => { opened = true; return 1n; } });
+		await analyzeKitSibling({ reportId: original.reportId, url: "https://queued-retire-test.net/", hashes: [KIT, SHARED] });
+		await runQueuedVisits(async () => { opened = true; return 1n; });
 		expect(opened).toBe(true);
 
 		await found(13, "reported");
@@ -224,6 +227,6 @@ describe("a campaign's kit search", () => {
 		expect((await queuedSearch()).payload).toMatchObject({ campaignId: older.campaignId.toString() });
 		const plain = await site(34n, "no-code-test.com", []);
 		expect(await armCampaignKitSearch(plain.campaignId)).toBe(false);
-		expect((await getDb()).select().from(abuseJobs).where(and(eq(abuseJobs.jobType, "search_campaign_kits"), eq(abuseJobs.reportId, plain.reportId))).all()).toEqual([]);
+		expect((await getDb()).select().from(jobs).where(and(eq(jobs.jobType, "search_campaign_kits"), eq(jobs.reportId, plain.reportId))).all()).toEqual([]);
 	});
 });

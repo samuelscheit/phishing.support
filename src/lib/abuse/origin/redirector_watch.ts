@@ -6,14 +6,14 @@ import { SubmissionsEntity } from "../../db/entities/submissions";
 import { errorSummary } from "../../util/error_text";
 import { readResponseBody } from "../../network/bounded_fetch";
 import { fetchThroughPublicRedirects, PublicRedirectError, type PublicRedirectDependencies } from "../../network/public_redirects";
-import { createWebsiteSubmission } from "../../submissions/website";
-import { analyzeWebsite } from "../../website/analysis/ai";
+import { createWebsiteSubmission, websiteSubmissionDedupeKey } from "../../submissions/website";
+import { fairKeyOfCaseId, isVisitPending, WebsiteVisitPendingError } from "../../website/visit_queue/queue";
 import { websiteSite } from "../../website/info/site";
 import type { WebsiteNavigationHop, WebsiteRoute, WebsiteSiteAssessment } from "../../website/types";
 import { reportedSiteRoute, websiteRoutes } from "../../website/routes";
 import { analyzedPage, isPageHop } from "../../website/visit/capture_files";
 import { AbuseRepository } from "../repository";
-import type { AbuseJob } from "../schema";
+import type { Job } from "../schema";
 import { normalizePublicHttpUrl } from "../security/security";
 import { throwIfAborted } from "../worker/shared";
 import { DAY_MS } from "../../util/date_time";
@@ -245,33 +245,43 @@ type RedirectorVisit = { submissionId: bigint; status: string; destination?: str
 
 export type RedirectorWatchDependencies = {
 	checkRedirector?: (url: string, dependencies: RedirectorCheckDependencies) => Promise<RedirectorCheck>;
-	analyzeWebsite?: typeof analyzeWebsite;
 	now?: () => Date;
 };
+
+/** The case this check's browser visit opened: one per check (`visit: watch-<job>`). */
+const redirectorVisitKey = (job: Job, state: RedirectorWatchState) => websiteSubmissionDedupeKey(state.url, `watch-${job.id.toString()}`);
+
+/**
+ * What this check's visit found, read back from its case. The visit runs in
+ * the visit queue; until it is done the check waits (`WebsiteVisitPendingError`)
+ * without holding a worker slot, and runs again to read it.
+ */
+async function readRedirectorVisit(submissionId: bigint, state: RedirectorWatchState): Promise<RedirectorVisit> {
+	const visited = await SubmissionsEntity.get(submissionId);
+	if (isVisitPending(visited?.status)) throw new WebsiteVisitPendingError(submissionId);
+	const destination = visited?.data.kind === "website" ? chainDestination(visited.data.website, state.url) : undefined;
+	return { submissionId, status: visited?.status ?? "missing", ...(destination ? { destination } : {}) };
+}
 
 /**
  * Visit the redirector in the browser as a new case, dated by this check: the
  * site's earlier cases stay as they were. The full analysis runs, cloaking
  * routes and verification gates included; the case follows the redirector's
- * chain to wherever it leads and reports each reportable site of it.
+ * chain to wherever it leads and reports each reportable site of it. Its
+ * visit counts against the share of the case the redirector was reported in.
  */
-async function visitRedirector(job: AbuseJob, state: RedirectorWatchState, dependencies: RedirectorWatchDependencies): Promise<RedirectorVisit> {
+async function visitRedirector(job: Job, state: RedirectorWatchState): Promise<RedirectorVisit> {
 	const report = await AbuseRepository.getReport(job.reportId!);
-	let analysis: Promise<unknown> | undefined;
-	const submissionId = await createWebsiteSubmission({
+	const { id } = await createWebsiteSubmission({
 		url: state.url,
 		source: `redirector-watch:${job.reportId!.toString()}`,
 		visit: `watch-${job.id.toString()}`,
 		reporterIp: report?.requesterIp ?? undefined,
 		reporterCountry: report?.requesterCountry ?? undefined,
 		reporterHeaders: report?.requesterHeaders ?? undefined,
-	}, (options) => (analysis = (dependencies.analyzeWebsite ?? analyzeWebsite)(options)));
-	// Waiting keeps the capture inside the worker lane's concurrency. A retried
-	// job finds its case already created and reads what it found.
-	await analysis;
-	const visited = await SubmissionsEntity.get(submissionId);
-	const destination = visited?.data.kind === "website" ? chainDestination(visited.data.website, state.url) : undefined;
-	return { submissionId, status: visited?.status ?? "missing", ...(destination ? { destination } : {}) };
+		fairKey: await fairKeyOfCaseId(report?.submissionId),
+	});
+	return readRedirectorVisit(id, state);
 }
 
 /**
@@ -283,7 +293,7 @@ async function visitRedirector(job: AbuseJob, state: RedirectorWatchState, depen
  * without a new host.
  */
 export async function watchRedirector(
-	params: { job: AbuseJob; signal?: AbortSignal },
+	params: { job: Job; signal?: AbortSignal },
 	dependencies: RedirectorWatchDependencies = {},
 ): Promise<void> {
 	const { job, signal } = params;
@@ -296,9 +306,13 @@ export async function watchRedirector(
 	const check = await (dependencies.checkRedirector ?? checkRedirector)(state.url, { signal });
 	throwIfAborted(signal);
 	const checkedSite = check.kind === "destination" ? websiteSite(check.url) : undefined;
-	const visit = checkedSite && state.sites.includes(checkedSite) && checks % REDIRECTOR_WATCH_BROWSER_EVERY !== 0
-		? undefined
-		: await visitRedirector(job, state, dependencies);
+	// A check that already opened its visit (it waited for it) reads that visit, whatever the cheap check says now.
+	const opened = await SubmissionsEntity.findIdByDedupeKey(redirectorVisitKey(job, state));
+	const visit = opened !== undefined
+		? await readRedirectorVisit(opened, state)
+		: checkedSite && state.sites.includes(checkedSite) && checks % REDIRECTOR_WATCH_BROWSER_EVERY !== 0
+			? undefined
+			: await visitRedirector(job, state);
 	throwIfAborted(signal);
 
 	const reached = [checkedSite, visit?.destination ? websiteSite(visit.destination) : undefined].filter((site): site is string => Boolean(site));

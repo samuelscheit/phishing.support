@@ -10,7 +10,7 @@ import { sendAbuseEmailRoute } from "../abuse/mail/send";
 import { abuseCaseTag, authenticatedSender, canonicalSubject, subjectRepeats } from "../abuse/mail/correlation";
 import { deliveryFailure } from "../abuse/mail/delivery_report";
 import { AbuseRepository } from "../abuse/repository";
-import { abuseJobs, abuseMailMessages } from "../abuse/schema";
+import { jobs, abuseMailMessages } from "../abuse/schema";
 import { classifyReply, nextContactRoute, routeToNextContact } from "../abuse/worker/mail";
 import { repairIpRoutesWithoutFallback } from "../abuse/worker/ip_fallback_repair";
 import { createAbuseEmailDraft } from "../abuse/mail/draft";
@@ -310,7 +310,7 @@ describe("delivery-status notifications", () => {
 		await classifyReply(bounce!.id);
 		expect(await AbuseRepository.getRoute(sent.route.id)).toMatchObject({ status: "delivery_failed" });
 		expect(await AbuseRepository.getMailMessage(bounce!.id)).toMatchObject({ classification: "bounce" });
-		const resends = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email");
+		const resends = (await getDb()).select().from(jobs).where(eq(jobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email");
 		expect(resends).toEqual([]);
 	});
 
@@ -334,10 +334,10 @@ describe("delivery-status notifications", () => {
 			bouncedRouteId: sent.route.id.toString(),
 			fallbackContacts: [{ email: "cs@helpdesk.example", source: "domain_whois" }],
 		});
-		const jobs = (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, next!.id)).all();
-		expect(jobs.map((job) => job.jobType)).toEqual(["send_email"]);
+		const queuedJobs = (await getDb()).select().from(jobs).where(eq(jobs.routeId, next!.id)).all();
+		expect(queuedJobs.map((job) => job.jobType)).toEqual(["send_email"]);
 		// No resend to the dead mailbox itself.
-		expect((await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email")).toEqual([]);
+		expect((await getDb()).select().from(jobs).where(eq(jobs.routeId, sent.route.id)).all().filter((job) => job.jobType === "send_email")).toEqual([]);
 		// A replayed classification never opens a second route for the same contact.
 		await (await import("../abuse/worker/mail")).routeToNextContact(sent.route.id);
 		expect((await AbuseRepository.listRoutes(sent.reportId)).filter((route) => route.verifiedEmail === "support@helpdesk.example")).toHaveLength(1);
@@ -376,12 +376,12 @@ describe("delivery-status notifications", () => {
 		return { ...sent, refusal: first!, sends, resendAnswered };
 	}
 
-	const sendJobs = (routeId: bigint) => getDb().then((db) => db.select().from(abuseJobs).where(eq(abuseJobs.routeId, routeId)).all().filter((job) => job.jobType === "send_email"));
+	const sendJobs = (routeId: bigint) => getDb().then((db) => db.select().from(jobs).where(eq(jobs.routeId, routeId)).all().filter((job) => job.jobType === "send_email"));
 	let resends = 0;
 	/** The route's queued resend goes out (its job done): the new send's outbound mail. */
 	async function resendReport(sent: Awaited<ReturnType<typeof sentReport>>) {
 		const db = await getDb();
-		db.update(abuseJobs).set({ status: "completed" }).where(eq(abuseJobs.routeId, sent.route.id)).run();
+		db.update(jobs).set({ status: "completed" }).where(eq(jobs.routeId, sent.route.id)).run();
 		const retry = await AbuseRepository.beginEmailDelivery({ routeId: sent.route.id, providerPayload: { source: "test" }, correlationKey: `test-mail:${sent.route.id.toString()}:resend-${++resends}` });
 		await sendAbuseEmailRoute({
 			reportId: sent.reportId, routeId: sent.route.id, runId: retry!.run.id, recipient: sent.route.verifiedEmail!,

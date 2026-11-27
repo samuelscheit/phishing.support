@@ -11,7 +11,8 @@ import type { WebsiteCloakedDestination, WebsiteCloaking, WebsiteDevice, Website
 export const submissionKind = ["email", "website"] as const;
 export type SubmissionKind = (typeof submissionKind)[number];
 
-export const submissionStatus = ["running", "failed", "reported", "invalid"] as const;
+/** `queued`: a website case waiting in the visit queue for its turn (website/visit_queue). */
+export const submissionStatus = ["queued", "running", "failed", "reported", "invalid"] as const;
 export type SubmissionStatus = (typeof submissionStatus)[number];
 
 export const analysisRunStatus = ["running", "completed", "failed"] as const;

@@ -9,7 +9,7 @@ import { BrowserFormError } from "../providers/kit/browser_form";
 import { ProviderSubmissionRetryLaterError } from "../providers/submission_contracts";
 import { ProviderLoginError } from "../providers/login_session/session";
 import { AbuseRepository } from "../repository";
-import { abuseEvents, abuseJobs, type AbuseJobType } from "../schema";
+import { abuseEvents, jobs, type JobType } from "../schema";
 import { AbuseWorker } from "./index";
 import { JOB_WAIT_LIMIT_MS, browserWaitDelayMs, MAX_RETRIES } from "./retry";
 
@@ -27,7 +27,7 @@ const WRAPPED: Record<string, () => Error> = {
 let sequence = 0;
 
 /** A provider-submission route whose run is `starting` (claimed, before its marker), and a job of `jobType` for it. */
-async function routeWithJob(jobType: AbuseJobType, routeStatus: "running" | "submitted" = "running") {
+async function routeWithJob(jobType: JobType, routeStatus: "running" | "submitted" = "running") {
 	sequence += 1;
 	const target_ = `browser-wait-${sequence}.example.com`;
 	const request = await validateAbuseReportRequest({
@@ -63,19 +63,19 @@ async function routeWithJob(jobType: AbuseJobType, routeStatus: "running" | "sub
 
 async function jobRow(id: bigint) {
 	const db = await getDb();
-	return db.select().from(abuseJobs).where(eq(abuseJobs.id, id)).get()!;
+	return db.select().from(jobs).where(eq(jobs.id, id)).get()!;
 }
 
-async function setJob(id: bigint, values: Partial<typeof abuseJobs.$inferInsert>) {
+async function setJob(id: bigint, values: Partial<typeof jobs.$inferInsert>) {
 	const db = await getDb();
-	db.update(abuseJobs).set(values).where(eq(abuseJobs.id, id)).run();
+	db.update(jobs).set(values).where(eq(jobs.id, id)).run();
 }
 
 /** Run exactly this job once, its handler failing with `error`. */
 async function failOnce(jobId: bigint, error: () => unknown) {
 	const db = await getDb();
 	// Only this job is due: every other queued one waits.
-	db.update(abuseJobs).set({ nextAttemptAt: new Date(Date.now() + 365 * 24 * HOUR) }).where(and(eq(abuseJobs.status, "queued"), ne(abuseJobs.id, jobId))).run();
+	db.update(jobs).set({ nextAttemptAt: new Date(Date.now() + 365 * 24 * HOUR) }).where(and(eq(jobs.status, "queued"), ne(jobs.id, jobId))).run();
 	await setJob(jobId, { nextAttemptAt: new Date(0) });
 	const worker = new AbuseWorker({ owner: `browser-wait-${jobId.toString()}`, processJob: async (job) => {
 		if (job.id !== jobId) throw new Error(`unexpected job ${job.id.toString()}`);

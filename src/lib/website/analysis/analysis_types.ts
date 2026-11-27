@@ -14,6 +14,8 @@ export type WebsiteCapture = Awaited<ReturnType<typeof archiveWebsite>> & { offe
 
 /** Network boundaries of one website analysis; tests replace them. */
 export type WebsiteAnalysisDependencies = {
+	/** The visit job's: aborted, the visit ends at its next step and leaves the case to the job's recovery. */
+	signal?: AbortSignal;
 	getInfo?: typeof getInfo;
 	archiveWebsite?: typeof archiveWebsite;
 	analysisClient?: AnalysisClient;

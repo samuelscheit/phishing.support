@@ -5,7 +5,7 @@ import { getDb } from "../../../db";
 import { useTemporaryDatabase } from "../../../db/test_helpers";
 import { validateAbuseReportRequest } from "../../contracts";
 import { AbuseRepository } from "../../repository";
-import { abuseJobs } from "../../schema";
+import { jobs } from "../../schema";
 import { pollProviderCorrespondence } from "../../worker/correspondence";
 
 import { netcraftProvider } from ".";
@@ -85,7 +85,7 @@ describe("Netcraft correspondence polling", () => {
 		return { reportId: report.reportId, route };
 	}
 
-	const polls = async (routeId: bigint) => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.routeId, routeId)).all().filter((job) => job.jobType === "poll_provider_correspondence" && job.status === "queued");
+	const polls = async (routeId: bigint) => (await getDb()).select().from(jobs).where(eq(jobs.routeId, routeId)).all().filter((job) => job.jobType === "poll_provider_correspondence" && job.status === "queued");
 
 	test("records each verdict once and reads again only while Netcraft is still analysing", async () => {
 		let body = { state: "processing", pending: true, has_urls: true, uuid: UUID };

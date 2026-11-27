@@ -9,7 +9,7 @@ import type { AnalyzeWebsiteOptions } from "../../website/analysis/ai";
 import type { WebsiteNavigationHop } from "../../website/types";
 import { validateAbuseReportRequest } from "../contracts";
 import { AbuseRepository } from "../repository";
-import { abuseJobs, type AbuseJob } from "../schema";
+import { jobs, type Job } from "../schema";
 import {
 	checkRedirector,
 	documentRedirect,
@@ -22,6 +22,8 @@ import {
 	watchRedirector,
 } from "./redirector_watch";
 import { navigationHop } from "../../website/test_helpers";
+import { WebsiteVisitPendingError } from "../../website/visit_queue/queue";
+import { runQueuedVisits } from "../../website/visit_queue/test_helpers";
 
 const ROTATOR = "https://openanonymity.chat/x/?ots-cmpgn-refer=TEST_REFERRER";
 
@@ -243,7 +245,7 @@ async function confirmedDestination(options: { direct?: boolean } = {}) {
 	return AbuseRepository.createReport({ request, reporter: { reporterCountry: "CH" }, submissionId: CASE_ID, subject: { site: domain } });
 }
 
-const watchJobs = async () => (await getDb()).select().from(abuseJobs).where(eq(abuseJobs.jobType, "watch_redirector")).all();
+const watchJobs = async () => (await getDb()).select().from(jobs).where(eq(jobs.jobType, "watch_redirector")).all();
 
 describe("starting a redirector watch", () => {
 	useTemporaryDatabase();
@@ -293,7 +295,24 @@ function browser(outcome: { reaches?: string; status?: "failed" | "invalid" | "r
 	return { analyzeWebsite, visits };
 }
 
-async function watchJob(reportId: bigint, state: Partial<RedirectorWatchState> = {}): Promise<AbuseJob> {
+type ObservedDependencies = NonNullable<Parameters<typeof watchRedirector>[1]> & { analyzeWebsite: (options: AnalyzeWebsiteOptions) => Promise<unknown> };
+
+/**
+ * One check as the worker runs it: a check that opens a browser visit waits for
+ * the visit queue, which runs the visit with this analysis, and then runs again
+ * to read the finished case.
+ */
+async function watch(params: Parameters<typeof watchRedirector>[0], { analyzeWebsite, ...dependencies }: ObservedDependencies) {
+	try {
+		await watchRedirector(params, dependencies);
+	} catch (error) {
+		if (!(error instanceof WebsiteVisitPendingError)) throw error;
+		await runQueuedVisits(analyzeWebsite);
+		await watchRedirector(params, dependencies);
+	}
+}
+
+async function watchJob(reportId: bigint, state: Partial<RedirectorWatchState> = {}): Promise<Job> {
 	return AbuseRepository.enqueueJob({
 		jobType: "watch_redirector",
 		reportId,
@@ -306,7 +325,7 @@ const DAY = 24 * 60 * 60_000;
 const CHECKED_AT = new Date("2026-11-12T12:00:00Z");
 const checkFinds = (check: RedirectorCheck) => async () => check;
 
-async function successor(job: AbuseJob) {
+async function successor(job: Job) {
 	const queued = (await watchJobs()).filter((candidate) => candidate.id !== job.id);
 	expect(queued.length).toBeLessThanOrEqual(1);
 	return queued[0];
@@ -324,7 +343,7 @@ describe("a daily redirector check", () => {
 		const report = await confirmedDestination();
 		const job = await watchJob(report.reportId);
 		const { analyzeWebsite, visits } = browser({});
-		await watchRedirector({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://x-com.email/", urls: [ROTATOR, "https://x-com.email/"] }), analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://x-com.email/", urls: [ROTATOR, "https://x-com.email/"] }), analyzeWebsite, now: () => CHECKED_AT });
 
 		expect(visits).toEqual([]);
 		expect(await successor(job)).toMatchObject({
@@ -340,7 +359,7 @@ describe("a daily redirector check", () => {
 		const report = await confirmedDestination();
 		const job = await watchJob(report.reportId);
 		const { analyzeWebsite, visits } = browser({ reaches: "https://assistdeparments-x.com/" });
-		await watchRedirector({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://assistdeparments-x.com/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://assistdeparments-x.com/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
 
 		expect(visits).toHaveLength(1);
 		expect(visits[0]).toMatchObject({ url: ROTATOR, reporterCountry: "CH" });
@@ -361,7 +380,7 @@ describe("a daily redirector check", () => {
 		const report = await confirmedDestination();
 		const job = await watchJob(report.reportId, { checks: 3 });
 		const { analyzeWebsite } = browser({ reaches: VISIT_DESTINATION });
-		await watchRedirector({ job }, { checkRedirector: checkFinds({ kind: "stays", urls: [ROTATOR] }), analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: checkFinds({ kind: "stays", urls: [ROTATOR] }), analyzeWebsite, now: () => CHECKED_AT });
 		expect(await successor(job)).toMatchObject({ payload: { sites: ["x-com.email", "new-kit.example"], checks: 4, lastNewAt: CHECKED_AT.toISOString() } });
 	});
 
@@ -369,7 +388,7 @@ describe("a daily redirector check", () => {
 		const report = await confirmedDestination();
 		const job = await watchJob(report.reportId, { checks: 6 });
 		const { analyzeWebsite, visits } = browser({ reaches: VISIT_DESTINATION });
-		await watchRedirector({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://x-com.email/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://x-com.email/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
 		expect(visits).toHaveLength(1);
 		expect(await successor(job)).toMatchObject({ payload: { sites: ["x-com.email", "new-kit.example"], checks: 7 } });
 	});
@@ -379,12 +398,12 @@ describe("a daily redirector check", () => {
 		const unreachable = checkFinds({ kind: "unreachable", reason: "queryA ENOTFOUND openanonymity.chat", urls: [] });
 		const { analyzeWebsite, visits } = browser({ status: "failed" });
 		const second = await watchJob(report.reportId, { checks: 4, misses: 1 });
-		await watchRedirector({ job: second }, { checkRedirector: unreachable, analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job: second }, { checkRedirector: unreachable, analyzeWebsite, now: () => CHECKED_AT });
 		const third = (await successor(second))!;
 		expect(third.payload).toMatchObject({ misses: 2, checks: 5 });
 
 		await AbuseRepository.claimNextJob("test", 60_000, { jobTypes: ["watch_redirector"] });
-		await watchRedirector({ job: third }, { checkRedirector: unreachable, analyzeWebsite, now: () => new Date(CHECKED_AT.getTime() + DAY) });
+		await watch({ job: third }, { checkRedirector: unreachable, analyzeWebsite, now: () => new Date(CHECKED_AT.getTime() + DAY) });
 		expect(visits).toHaveLength(2);
 		// The third check queued no fourth.
 		expect((await watchJobs()).map(({ id }) => id).sort()).toEqual([second.id, third.id].sort());
@@ -396,7 +415,7 @@ describe("a daily redirector check", () => {
 		const report = await confirmedDestination();
 		const job = await watchJob(report.reportId, { misses: 2 });
 		const { analyzeWebsite } = browser({ status: "invalid" });
-		await watchRedirector({ job }, { checkRedirector: checkFinds({ kind: "unreachable", reason: "HTTP 403", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: checkFinds({ kind: "unreachable", reason: "HTTP 403", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
 		expect(await successor(job)).toMatchObject({ payload: { misses: 0, sites: ["x-com.email"] } });
 	});
 
@@ -404,7 +423,7 @@ describe("a daily redirector check", () => {
 		const report = await confirmedDestination();
 		const job = await watchJob(report.reportId, { checks: 29, lastNewAt: new Date(CHECKED_AT.getTime() - 30 * DAY).toISOString() });
 		const { analyzeWebsite } = browser({});
-		await watchRedirector({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://x-com.email/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://x-com.email/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
 		expect(await successor(job)).toBeUndefined();
 		expect(await lastEvent(report.reportId)).toMatchObject({ ended: "the redirector led nowhere new in 30 days" });
 	});
@@ -414,9 +433,9 @@ describe("a daily redirector check", () => {
 		const job = await watchJob(report.reportId);
 		const { analyzeWebsite, visits } = browser({ reaches: "https://assistdeparments-x.com/" });
 		const check = checkFinds({ kind: "destination", url: "https://assistdeparments-x.com/", urls: [] });
-		await watchRedirector({ job }, { checkRedirector: check, analyzeWebsite, now: () => CHECKED_AT });
-		await (await getDb()).delete(abuseJobs).where(and(eq(abuseJobs.jobType, "watch_redirector"), eq(abuseJobs.status, "queued"), ne(abuseJobs.id, job.id))).run();
-		await watchRedirector({ job: { ...job, status: "running" } }, { checkRedirector: check, analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: check, analyzeWebsite, now: () => CHECKED_AT });
+		await (await getDb()).delete(jobs).where(and(eq(jobs.jobType, "watch_redirector"), eq(jobs.status, "queued"), ne(jobs.id, job.id))).run();
+		await watch({ job: { ...job, status: "running" } }, { checkRedirector: check, analyzeWebsite, now: () => CHECKED_AT });
 		expect(visits).toHaveLength(1);
 		expect(await lastEvent(report.reportId)).toMatchObject({ visit: { status: "reported", destination: "https://assistdeparments-x.com/" } });
 		const visitCases = (await getDb()).select().from(submissions).where(eq(submissions.dedupeKey, `website-openanonymity.chat#watch-${job.id.toString()}`)).all();
@@ -430,7 +449,7 @@ describe("a daily redirector check", () => {
 		// The destination reported while the watch runs, then once its next check is queued.
 		await enqueueRedirectorWatch(report.reportId, CASE_ID, DESTINATION);
 		const { analyzeWebsite } = browser({ reaches: "https://assistdeparments-x.com/" });
-		await watchRedirector({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://assistdeparments-x.com/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
+		await watch({ job }, { checkRedirector: checkFinds({ kind: "destination", url: "https://assistdeparments-x.com/", urls: [] }), analyzeWebsite, now: () => CHECKED_AT });
 		await enqueueRedirectorWatch(report.reportId, CASE_ID, DESTINATION);
 		expect((await watchJobs()).map(({ status }) => status).sort()).toEqual(["queued", "running"]);
 	});

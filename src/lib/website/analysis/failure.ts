@@ -3,6 +3,7 @@ import { errorText } from "../../util/error_text";
 import { SubmissionsEntity } from "../../db/entities/submissions";
 import type { WebsiteSubmissionData } from "../../db/schema";
 import { sleep } from "../../util/sleep";
+import { enqueueWebsiteVisit } from "../visit_queue/queue";
 
 /** Capture retries after a browser-service failure: 5 s, 15 s, then 45 s. */
 export const BROWSER_BACKOFF_MS = [5_000, 15_000, 45_000] as const;
@@ -47,7 +48,8 @@ export const BROWSER_OUTAGE_RETRY_DELAYS_MS: readonly number[] = [
  * Fail the case with a readable reason. A failure another visit can change
  * (`retry`: the browser service failed, or the site's flow could not be
  * finished) is re-queued automatically instead of waiting until someone
- * notices; `exhausted` says so once the retries are spent.
+ * notices, as a visit job due after its backoff; `exhausted` says so once the
+ * retries are spent.
  */
 export async function failWebsiteAnalysis(submissionId: bigint, failure: {
 	info: string;
@@ -74,6 +76,7 @@ export async function failWebsiteAnalysis(submissionId: bigint, failure: {
 		info: `${failure.info} Retrying automatically at ${nextAttemptAt.toISOString().slice(11, 16)} UTC (attempt ${retry.attempts + 1} of ${delaysMs.length}).`,
 		data: { kind: "website", website: { ...website, autoRetry: { attempts: retry.attempts + 1, nextAttemptAt: nextAttemptAt.toISOString(), reason: retry.reason } } },
 	});
+	await enqueueWebsiteVisit({ submission: submission!, trigger: "automatic", notBefore: nextAttemptAt });
 }
 
 /** A failed run: retried automatically when the browser service (not the site) failed. */
