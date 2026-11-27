@@ -40,7 +40,7 @@ function siteKind(allegation: string): string {
 }
 
 /** What our check found, in lines a reader can repeat. */
-export function verificationLines(verification: ContentVerification): string[] {
+function verificationLines(verification: ContentVerification): string[] {
 	const how = verification.tier === "fetch" ? "a plain request" : verification.tier === "browser" ? "a browser like the visitors'" : "a browser like the visitors' and our page analysis";
 	const head = `Checked ${utc(verification.checkedAt)} with ${how}:`;
 	if (verification.verdict === "served") {

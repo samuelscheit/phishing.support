@@ -5,7 +5,7 @@ import type { AbuseEvent } from "../schema";
 import { ESCALATION_EVENT } from "./run";
 
 /** The operator settled a step only a person can take: filed the ICANN complaint, or decided what to do after the ladder. */
-export const ESCALATION_STEP_RESOLVED_EVENT = "escalation.step_resolved";
+const ESCALATION_STEP_RESOLVED_EVENT = "escalation.step_resolved";
 
 /**
  * A step of the ladder waiting for the operator:

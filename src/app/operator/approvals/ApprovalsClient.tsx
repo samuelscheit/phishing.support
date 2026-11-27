@@ -22,22 +22,34 @@ const KIND_LABEL: Record<string, string> = {
 	preservation_notice: "Preservation notice",
 };
 
+function ContextLink({ href, label }: { href: string; label: string }) {
+	return <a href={href} className="text-primary underline-offset-4 hover:underline">{label}</a>;
+}
+
+/** One mail waiting: whom it goes to and why at a glance; the mail itself opens to be read, edited and approved. */
 function MailCard({ mail }: { mail: DraftedMailView }) {
 	return (
 		<Card>
-			<CardHeader className="gap-1 pb-3">
+			<CardHeader className="gap-1.5 pb-3">
 				<CardTitle className="flex flex-wrap items-center gap-2 text-base">
 					<Mail className="h-4 w-4" />
 					{KIND_LABEL[mail.kind] ?? mail.kind}
 					{mail.target && <Badge variant="secondary" className="font-mono">{mail.target}</Badge>}
 				</CardTitle>
-				<CardDescription className="break-words">
-					To {mail.recipientLabel} &lt;{mail.recipient}&gt; · drafted {formatUtcDateTime(mail.createdAt)}
-					{mail.contextHref && <> · <a href={mail.contextHref} className="text-primary underline-offset-4 hover:underline">{mail.contextHref.startsWith("/operator/campaigns/") ? "campaign and attachments" : "case"}</a></>}
+				<p className="break-words text-sm">To <span className="font-medium">{mail.recipientLabel}</span> &lt;{mail.recipient}&gt;</p>
+				{mail.reason && <CardDescription className="break-words">{mail.reason}</CardDescription>}
+				<CardDescription>
+					Drafted {formatUtcDateTime(mail.createdAt)}
+					{mail.context && <> · <ContextLink href={mail.context.href} label={mail.context.label === "campaign" ? "Open campaign (attachments)" : "Open case"} /></>}
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<DraftEditor mail={mail} />
+				<details className="group rounded-md border bg-muted/30">
+					<summary className="cursor-pointer px-3 py-2 text-sm"><span className="font-medium">Review and approve</span> <span className="text-muted-foreground">· {mail.subject}</span></summary>
+					<div className="border-t bg-background p-3">
+						<DraftEditor mail={mail} />
+					</div>
+				</details>
 			</CardContent>
 		</Card>
 	);
@@ -52,7 +64,7 @@ function StepActions({ step, filed, children }: { step: OpenEscalationStep; file
 			<div className="flex flex-wrap items-center gap-2">
 				{children}
 				{filed && <Button size="sm" disabled={busy} onClick={() => run(url, { resolution: "filed" })}><Check />{filed}</Button>}
-				<Button size="sm" variant={filed ? "ghost" : "outline"} disabled={busy} onClick={() => run(url, { resolution: "dismissed" })}><X />{filed ? "Dismiss" : "Done"}</Button>
+				<Button size="sm" variant="ghost" disabled={busy} onClick={() => run(url, { resolution: "dismissed" })}><X />Dismiss</Button>
 			</div>
 			<ErrorLine error={error} />
 		</div>
@@ -69,12 +81,19 @@ function IcannCard({ step }: { step: OpenEscalationStep }) {
 					<Badge variant="secondary" className="font-mono">{step.target}</Badge>
 				</CardTitle>
 				<CardDescription>
-					ICANN takes complaints through its web form only. Check that {step.registrar ?? "the registrar"} is the accredited registrar (not a reseller), choose &quot;Abuse/DNS Abuse (Registrar)&quot;, paste the text and attach the case&apos;s evidence.
-					{" "}Prepared {formatUtcDateTime(step.at)}{step.caseHref && <> · <a href={step.caseHref} className="text-primary underline-offset-4 hover:underline">case</a></>}
+					Prepared {formatUtcDateTime(step.at)}{step.caseHref && <> · <ContextLink href={step.caseHref} label="Open case" /></>}
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-3">
-				<Textarea readOnly value={step.text ?? ""} rows={14} className="font-mono text-xs leading-relaxed" />
+				<ol className="list-decimal space-y-1 pl-5 text-sm">
+					<li>Check that {step.registrar ?? "the registrar"} is the ICANN-accredited registrar of {step.target}, not a reseller (lookup.icann.org).</li>
+					<li>Open ICANN&apos;s form and choose &quot;Abuse/DNS Abuse (Registrar)&quot;; ICANN takes no complaints by mail.</li>
+					<li>Paste the text below and attach the screenshots from the case.</li>
+				</ol>
+				<label className="block space-y-1">
+					<span className="text-xs font-medium text-muted-foreground">Complaint text (read-only, copy it into the form)</span>
+					<Textarea readOnly value={step.text ?? ""} className="max-h-[60vh] [field-sizing:content] font-mono text-xs leading-relaxed" />
+				</label>
 				<StepActions step={step} filed="Mark as filed">
 					<Button size="sm" variant="outline" onClick={() => copy(step.text ?? "")}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy text"}</Button>
 					{step.formUrl && <Button size="sm" variant="outline" asChild><a href={step.formUrl} target="_blank" rel="noreferrer"><ExternalLink />Open ICANN form</a></Button>}
@@ -93,12 +112,13 @@ function DecisionCard({ step }: { step: OpenEscalationStep }) {
 					<Badge variant="secondary" className="font-mono">{step.target}</Badge>
 				</CardTitle>
 				<CardDescription>
-					Two weeks after the first report the site still serves what was reported, and nothing automatic is left. Consider a criminal referral of its campaign.
-					{" "}{formatUtcDateTime(step.at)}{step.caseHref && <> · <a href={step.caseHref} className="text-primary underline-offset-4 hover:underline">case</a></>}
+					Two weeks after the first report the site still serves what was reported, and nothing automatic is left. Consider a criminal referral of its campaign. Since {formatUtcDateTime(step.at)}.
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<StepActions step={step} />
+				<StepActions step={step}>
+					{step.caseHref && <Button size="sm" variant="outline" asChild><a href={step.caseHref}><ExternalLink />Open case</a></Button>}
+				</StepActions>
 			</CardContent>
 		</Card>
 	);

@@ -19,7 +19,7 @@ import { DAY_MS } from "../../util/date_time";
  * 5. `exhausted` (14 days, once per site): nothing automatic is left; the
  *    operator decides (a criminal referral of the campaign).
  */
-export const ESCALATION_LADDER = [
+const ESCALATION_LADDER = [
 	{ level: 1, step: "follow_up", afterMs: 2 * DAY_MS },
 	{ level: 2, step: "next_contact", afterMs: 4 * DAY_MS },
 	{ level: 3, step: "upstream", afterMs: 5 * DAY_MS },
@@ -27,7 +27,7 @@ export const ESCALATION_LADDER = [
 	{ level: 5, step: "exhausted", afterMs: 14 * DAY_MS },
 ] as const;
 
-export type EscalationStepName = (typeof ESCALATION_LADDER)[number]["step"];
+type EscalationStepName = (typeof ESCALATION_LADDER)[number]["step"];
 
 /** Steps taken per route; the others are taken once for the site. */
 const ROUTE_STEPS: ReadonlySet<EscalationStepName> = new Set(["follow_up", "next_contact", "upstream"]);
@@ -36,7 +36,7 @@ const ROUTE_STEPS: ReadonlySet<EscalationStepName> = new Set(["follow_up", "next
 const ESCALATED_ROLES: ReadonlySet<ProviderRole> = new Set(["host", "registrar", "cdn"]);
 
 /** After this long since the first report, nothing is escalated any more: a step held back that long is stale. */
-export const ESCALATION_WINDOW_MS = 30 * DAY_MS;
+const ESCALATION_WINDOW_MS = 30 * DAY_MS;
 
 /** What the ladder reads of one route of the reported site. */
 export type EscalationRoute = {

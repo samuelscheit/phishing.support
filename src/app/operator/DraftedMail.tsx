@@ -48,6 +48,31 @@ export function ErrorLine({ error }: { error?: string }) {
  * It is sent exactly as approved. `children` sits above the actions (the
  * referral's attachments).
  */
+/** An action that cannot be undone, asked once more with what it does. */
+function Confirmed({ trigger, title, description, action, destructive = false, onConfirm }: { trigger: ReactNode; title: string; description: ReactNode; action: string; destructive?: boolean; onConfirm: () => void }) {
+	return (
+		<AlertDialog>
+			<AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>{title}</AlertDialogTitle>
+					<AlertDialogDescription asChild><div className="space-y-2 text-sm text-muted-foreground">{description}</div></AlertDialogDescription>
+				</AlertDialogHeader>
+				<AlertDialogFooter>
+					<AlertDialogCancel>Cancel</AlertDialogCancel>
+					<AlertDialogAction onClick={onConfirm} className={destructive ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : undefined}>{action}</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
+	);
+}
+
+/**
+ * A drafted mail the operator edits, approves or discards: a criminal
+ * referral, a preservation notice, or an escalation to an oversight body.
+ * It is sent exactly as approved; edits not saved yet are sent with it.
+ * `children` sits above the actions (the referral's attachments).
+ */
 export function DraftEditor({ mail, children }: { mail: { routeId: string; subject?: string; body?: string; recipient: string; recipientLabel: string }; children?: ReactNode }) {
 	const { busy, error, run } = useOperatorAction();
 	const [subject, setSubject] = useState(mail.subject ?? "");
@@ -58,37 +83,36 @@ export function DraftEditor({ mail, children }: { mail: { routeId: string; subje
 		<div className="space-y-3">
 			<label className="block space-y-1">
 				<span className="text-xs font-medium text-muted-foreground">Subject</span>
-				<Input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={400} />
+				<Input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={400} aria-label={`Subject of the mail to ${mail.recipientLabel}`} />
 			</label>
 			<label className="block space-y-1">
 				<span className="text-xs font-medium text-muted-foreground">Text</span>
-				<Textarea value={body} onChange={(event) => setBody(event.target.value)} rows={22} className="font-mono text-xs leading-relaxed" />
+				{/* Grows with the mail, so its last lines are seen before it is approved. */}
+				<Textarea value={body} onChange={(event) => setBody(event.target.value)} className="max-h-[70vh] [field-sizing:content] font-mono text-xs leading-relaxed" aria-label={`Text of the mail to ${mail.recipientLabel}`} />
 			</label>
 			{children}
 			<div className="flex flex-wrap items-center gap-2">
-				<AlertDialog>
-					<AlertDialogTrigger asChild>
-						<Button size="sm" disabled={busy}><Send />Approve and send</Button>
-					</AlertDialogTrigger>
-					<AlertDialogContent>
-						<AlertDialogHeader>
-							<AlertDialogTitle>Send this mail?</AlertDialogTitle>
-							<AlertDialogDescription>
-								It goes to {mail.recipientLabel} ({mail.recipient}) exactly as written. A sent mail cannot be recalled.
-							</AlertDialogDescription>
-						</AlertDialogHeader>
-						<AlertDialogFooter>
-							<AlertDialogCancel>Cancel</AlertDialogCancel>
-							<AlertDialogAction onClick={() => run(url, { action: "approve", subject, body })}>Send</AlertDialogAction>
-						</AlertDialogFooter>
-					</AlertDialogContent>
-				</AlertDialog>
+				<Confirmed
+					trigger={<Button size="sm" disabled={busy}><Send />{changed ? "Approve with your edits and send" : "Approve and send"}</Button>}
+					title="Send this mail?"
+					description={<>
+						<p>It goes to {mail.recipientLabel} ({mail.recipient}) exactly as written{changed ? ", with your edits" : ""}. A sent mail cannot be recalled.</p>
+						<p className="font-medium text-foreground">{subject}</p>
+					</>}
+					action="Send"
+					onConfirm={() => run(url, { action: "approve", subject, body })}
+				/>
 				<Button size="sm" variant="outline" disabled={busy || !changed} onClick={() => run(url, { action: "save", subject, body })}>
-					<Check />Save draft
+					<Check />{changed ? "Save draft" : "Saved"}
 				</Button>
-				<Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => run(url, { action: "discard" })}>
-					<Trash2 />Discard
-				</Button>
+				<Confirmed
+					trigger={<Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" disabled={busy}><Trash2 />Discard</Button>}
+					title="Discard this mail?"
+					description={<p>It is not sent to {mail.recipientLabel}, and the draft cannot be brought back.</p>}
+					action="Discard"
+					destructive
+					onConfirm={() => run(url, { action: "discard" })}
+				/>
 			</div>
 			<ErrorLine error={error} />
 		</div>

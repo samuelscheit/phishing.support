@@ -22,7 +22,7 @@ export class OperatorActionError extends Error {
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>'"`]+/gi;
 
-export function urlsIn(text: string): string[] {
+function urlsIn(text: string): string[] {
 	return [...new Set((text.match(URL_IN_TEXT) ?? []).map((url) => url.replace(/[),.;!?]+$/, "")))];
 }
 
@@ -64,8 +64,10 @@ export type DraftedMailView = {
 	body: string;
 	target: string;
 	createdAt: string;
+	/** Why the mail goes to its recipient, when the draft says so (escalations). */
+	reason?: string;
 	/** Where the mail's context is: the case of an escalation, the campaign of a referral (with its attachments). */
-	contextHref?: string;
+	context?: { href: string; label: "case" | "campaign" };
 };
 
 /** Every drafted mail waiting for the operator, oldest first. */
@@ -78,7 +80,9 @@ export async function listDraftedMails(): Promise<DraftedMailView[]> {
 		if (!report || report.status === "canceled") continue;
 		const snapshot = route.resolutionSnapshot ?? {};
 		const kind = typeof snapshot.escalationKind === "string" ? snapshot.escalationKind : typeof snapshot.referralMailKind === "string" ? snapshot.referralMailKind : "mail";
-		const contextHref = report.campaignId ? `/operator/campaigns/${report.campaignId.toString()}` : report.submissionId ? `/submissions/${report.submissionId.toString()}` : undefined;
+		const context = report.campaignId
+			? { href: `/operator/campaigns/${report.campaignId.toString()}`, label: "campaign" as const }
+			: report.submissionId ? { href: `/submissions/${report.submissionId.toString()}`, label: "case" as const } : undefined;
 		views.push({
 			routeId: route.id.toString(),
 			kind,
@@ -88,7 +92,8 @@ export async function listDraftedMails(): Promise<DraftedMailView[]> {
 			body: draft.body,
 			target: target?.normalizedTarget ?? "",
 			createdAt: route.createdAt.toISOString(),
-			...(contextHref ? { contextHref } : {}),
+			...(typeof snapshot.escalationReason === "string" ? { reason: snapshot.escalationReason } : {}),
+			...(context ? { context } : {}),
 		});
 	}
 	return views;

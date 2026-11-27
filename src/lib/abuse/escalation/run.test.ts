@@ -103,7 +103,11 @@ describe("escalating a report nobody acts on", () => {
 
 		// The operator sees the drafts still waiting and the steps only a person can take, and settles each once.
 		const { listDraftedMails } = await import("../approval/drafted_mail");
-		expect((await listDraftedMails()).filter((mail) => mail.target === DOMAIN).map((mail) => `${mail.kind} ${mail.recipient}`).sort()).toEqual(["brand phishing@paypal.com", "dsa_notice abuse@hosting.example"]);
+		const waiting = (await listDraftedMails()).filter((mail) => mail.target === DOMAIN);
+		expect(waiting.map((mail) => `${mail.kind} ${mail.recipient}`).sort()).toEqual(["brand phishing@paypal.com", "dsa_notice abuse@hosting.example"]);
+		// Each says why it goes to its recipient, and where its case is.
+		expect(waiting.find((mail) => mail.kind === "dsa_notice")).toMatchObject({ reason: expect.stringContaining("AS64500 is registered in NL (EU/EEA)"), context: { label: "case", href: expect.stringMatching(/^\/submissions\/\d+$/) } });
+		expect(waiting.find((mail) => mail.kind === "brand")!.reason).toBe("The site impersonates PayPal, which takes reports of fake sites at phishing@paypal.com (https://www.paypal.com/us/security/report-suspicious-activity).");
 		const { openEscalationSteps, resolveEscalationStep } = await import("./manual");
 		const open = (await openEscalationSteps()).filter((step) => step.reportId === reportId.toString());
 		expect(open.map((step) => step.kind)).toEqual(["icann_complaint", "decision"]);

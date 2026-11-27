@@ -42,7 +42,7 @@ export const NATIONAL_CERTS: Readonly<Record<string, Recipient>> = {
  * by the brand's registrable domain. A mailbox only for spoofed email
  * (Amazon's stop-spoofing@) is not one.
  */
-export const BRAND_PHISHING_MAILBOXES: Readonly<Record<string, Recipient>> = {
+const BRAND_PHISHING_MAILBOXES: Readonly<Record<string, Recipient>> = {
 	"apple.com": { name: "Apple", email: "reportphishing@apple.com", source: "https://support.apple.com/en-us/102568" },
 	"dhl.com": { name: "DHL", email: "phishing@dhl.com", source: "https://www.dhl.com/global-en/home/footer/fraud-awareness.html" },
 	"netflix.com": { name: "Netflix", email: "phishing@netflix.com", source: "https://help.netflix.com/en/node/65674" },

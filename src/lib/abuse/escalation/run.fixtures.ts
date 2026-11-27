@@ -18,7 +18,7 @@ export const DOMAIN = "paypal-verify-account.com";
 export const URL_ = `https://${DOMAIN}/signin`;
 export const SENT = new Date("2026-11-20T10:00:00Z");
 export const day = (days: number) => new Date(SENT.getTime() + days * DAY_MS);
-export const KIT = (token: string) => `<html><body><input type="hidden" name="t" value="${token}">${templatePage(10, (card) => `Confirm your PayPal account ${card} `.repeat(4))}</body></html>`;
+const KIT = (token: string) => `<html><body><input type="hidden" name="t" value="${token}">${templatePage(10, (card) => `Confirm your PayPal account ${card} `.repeat(4))}</body></html>`;
 
 /** The site as checks see it: up and serving the kit, or gone. */
 export function site(state: "kit" | "gone" | "decoy"): NonNullable<EscalationDependencies["verify"]>["site"] {

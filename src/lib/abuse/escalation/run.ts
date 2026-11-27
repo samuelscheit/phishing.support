@@ -213,19 +213,21 @@ async function oversight(context: StepContext): Promise<Record<string, unknown>>
 	const unanswered = climbing(context);
 	const providers = unanswered.map(unacted);
 	const country = context.hosting?.asn !== undefined ? await (dependencies.countryOf ?? ((asn: number) => registeredCountry(`AS${asn}`)))(context.hosting.asn).catch(() => undefined) : undefined;
-	const drafts: Array<{ kind: string; to: string; draft: Draft; label: string }> = [];
+	// Each draft says why it goes to its recipient, for the operator who approves it.
+	const drafts: Array<{ kind: string; to: string; draft: Draft; label: string; reason: string }> = [];
+	const network = context.hosting?.asn !== undefined ? `AS${context.hosting.asn}` : "the hosting network";
 	const cert = country ? NATIONAL_CERTS[country] : undefined;
-	if (cert && country) drafts.push({ kind: "cert", to: cert.email, label: cert.name, draft: certDraft({ cert, country, facts, unacted: providers }) });
+	if (cert && country) drafts.push({ kind: "cert", to: cert.email, label: cert.name, draft: certDraft({ cert, country, facts, unacted: providers }), reason: `${network} is registered in ${country}; ${cert.name} is its national CERT (${cert.source}).` });
 	if (country && DSA_COUNTRIES.has(country)) {
 		for (const state of unanswered.filter((candidate) => candidate.ladder.role === "host" && candidate.route.verifiedEmail)) {
-			drafts.push({ kind: "dsa_notice", to: state.route.verifiedEmail!, label: state.view.organisation, draft: dsaNoticeDraft({ host: unacted(state), facts }) });
+			drafts.push({ kind: "dsa_notice", to: state.route.verifiedEmail!, label: state.view.organisation, draft: dsaNoticeDraft({ host: unacted(state), facts }), reason: `${state.view.organisation} has not acted on our report, and ${network} is registered in ${country} (EU/EEA): a notice under Art. 16 DSA obliges a host serving the EU to decide on it. Check that it serves EU users.` });
 		}
 	}
 	const brand = brandRecipient((await AbuseRepository.getReport(target.reportId))?.legalBrandUrl);
-	if (brand) drafts.push({ kind: "brand", to: brand.email, label: brand.name, draft: brandDraft({ brand, facts, unacted: providers }) });
+	if (brand) drafts.push({ kind: "brand", to: brand.email, label: brand.name, draft: brandDraft({ brand, facts, unacted: providers }), reason: `The site impersonates ${brand.name}, which takes reports of fake sites at ${brand.email} (${brand.source}).` });
 
 	const drafted = [];
-	for (const { kind, to, label, draft } of drafts) {
+	for (const { kind, to, label, draft, reason } of drafts) {
 		const route = await draftMailRoute({
 			targetId: target.id,
 			routeKey: `escalation:${kind}:${to.toLowerCase()}`,
@@ -234,7 +236,7 @@ async function oversight(context: StepContext): Promise<Record<string, unknown>>
 			recipientLabel: label,
 			draft,
 			provenance: { source: "escalation_oversight", kind },
-			snapshot: { escalationKind: kind },
+			snapshot: { escalationKind: kind, escalationReason: reason },
 		});
 		drafted.push({ kind, to, routeId: route.id.toString() });
 	}

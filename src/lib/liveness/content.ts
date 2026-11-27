@@ -50,7 +50,7 @@ export type ContentMatch = { kind: "kit_file" | "page_body" | "page_structure" |
  * - `unverified`: nothing could be compared: the capture failed or the site
  *   showed every route a decoy.
  */
-export type ContentVerdict =
+type ContentVerdict =
 	| { verdict: "gone"; tier: "check" }
 	| { verdict: "served"; tier: "fetch" | "browser"; matches: ContentMatch[] }
 	| { verdict: "changed_malicious"; tier: "analysis"; finding: string }
@@ -71,7 +71,7 @@ export type ContentVerification = ContentVerdict & {
 export const stillAbusive = (verification: Pick<ContentVerification, "verdict">): boolean => verification.verdict === "served" || verification.verdict === "changed_malicious";
 
 /** What the case recorded of the reported site, to compare what it serves now with. */
-export type ContentReference = {
+type ContentReference = {
 	/** Its pages as the server sent them: the case's document bodies, and those later verifications confirmed. */
 	served: PageFingerprints[];
 	/** Its pages as the case's browser stored them (MHTML). */
@@ -171,7 +171,7 @@ async function reportedPayloads(reportId: bigint): Promise<ContentReference["pay
 const hasFingerprint = (fingerprints: PageFingerprints) => Boolean(fingerprints.body || fingerprints.structure);
 
 /** What the case recorded of the target's site, with the pages earlier verifications confirmed. */
-export async function loadContentReference(target: ContentTarget, website: WebsiteSubmissionData | undefined, submissionId: bigint | null, events: readonly AbuseEvent[], isShared?: IsSharedKitFile): Promise<ContentReference> {
+async function loadContentReference(target: ContentTarget, website: WebsiteSubmissionData | undefined, submissionId: bigint | null, events: readonly AbuseEvent[], isShared?: IsSharedKitFile): Promise<ContentReference> {
 	const pages = website && submissionId !== null ? await capturedPages(submissionId, website, target.url) : { served: [], rendered: [] };
 	return {
 		served: [...pages.served, ...learnedPages(events, target.targetId)].filter(hasFingerprint),
